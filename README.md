@@ -5,6 +5,8 @@
 ![platform](https://img.shields.io/badge/fnOS-aarch64%20%7C%20x86__64-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![data](https://img.shields.io/badge/GeoLite2-CC%20BY--SA%204.0-lightgrey)
+[![CI](https://github.com/Ranlove99/fnnetmon/actions/workflows/ci.yml/badge.svg)](https://github.com/Ranlove99/fnnetmon/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/下载-Releases-orange)](https://github.com/Ranlove99/fnnetmon/releases/latest)
 
 给 [飞牛 fnOS](https://www.fnosweb.com/) 写的网络流量监控：按**应用 / 服务 / 进程**排行，
 把每个连接对应到域名、国家地区和运营方，还能按进程或域名拦出向访问。
@@ -184,12 +186,18 @@ git push -u origin main
 ```
 
 push 后 `.github/workflows/ci.yml` 会自动跑 `go vet`、单测和双平台构建，
-并上传两个 `.fpk` 作为 workflow artifact。若要用 GitHub Releases 分发 fpk，
-给 tag 打 `v*` 后 CI 会附带产物（见 workflow 里的 release job）。
+并上传两个 `.fpk` 作为 workflow artifact。给 tag 打 `v*` 后 CI 还会自动建 Release
+并附带产物（见 workflow 里的 release job）——本仓库当前版本的 Release 就是这么出的：
+
+```bash
+git tag -a v0.9.9 -m "fnnetmon 0.9.9"
+git push origin v0.9.9
+```
 
 > CI 在 Linux 上走纯 Python 打包器，与 macOS 官方 `fnpack` 的产物结构一致、
-> 压缩流不同，因此 artifact 的大小和哈希与本地正式包不会相同，属正常。
-> 正式发布包建议在 macOS 上用 `./build.sh both` 出，并做一次真机安装验证。
+> 压缩流不同，因此 CI artifact 的大小和哈希与正式发布包不会相同，属正常。
+> **正式发布包建议在 macOS 上用 `./build.sh both` 出，做一次真机安装验证后再传上去**——
+> 本仓库 v0.9.9 Release 里的两个 `.fpk` 就是这样出的官方包。
 
 > `pkg/fnnetmon/cmd/*` 是没有扩展名的 shell 脚本，`.gitattributes` 强制它们用 LF。
 > Windows 上请设置 `git config core.autocrlf false`，否则安装钩子会带 CRLF 而执行失败。
