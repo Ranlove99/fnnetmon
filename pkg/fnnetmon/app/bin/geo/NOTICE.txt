@@ -1,0 +1,28 @@
+GeoLite2 数据署名 / Attribution
+================================
+
+本应用内置以下数据库，随 fpk 一起分发：
+
+  GeoLite2-Country.mmdb
+  GeoLite2-City.mmdb
+  GeoLite2-ASN.mmdb
+
+这些数据由 MaxMind 创建，来源 https://www.maxmind.com
+以 Creative Commons 署名-相同方式共享 4.0 国际许可协议（CC BY-SA 4.0）发布：
+https://creativecommons.org/licenses/by-sa/4.0/
+
+This product includes GeoLite2 data created by MaxMind, available from
+https://www.maxmind.com. The databases are licensed under CC BY-SA 4.0.
+
+---
+
+对数据做了哪些改动：没有。三个文件原样打包，未修改内容，也未做格式转换。
+
+相同方式共享：数据库文件本身，以及任何由它派生的数据，继续适用 CC BY-SA 4.0。
+本应用的源代码不因打包这些数据而受该许可约束——CC BY-SA 只覆盖数据库及其衍生数据。
+
+数据日期：见各文件内嵌的 build epoch。界面上「概览 → 域名归因 → 地理 / ASN」
+会显示实际加载的库来自内置还是数据目录，以及构建日期。
+
+如何更新：把新的 mmdb 放进数据目录（默认 /vol1/@appdata/fnnetmon），
+它会优先于内置库被加载，不需要重新打包或升级应用。

@@ -1,0 +1,3 @@
+#!/bin/bash
+# 卸载后：默认保留 ${TRIM_PKGVAR} 下的数据，由用户自行清理
+exit 0

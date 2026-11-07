@@ -1,0 +1,7 @@
+#!/bin/bash
+# 配置变更后重启服务
+if [ -x "${TRIM_APPDEST}/cmd/main" ]; then
+    "${TRIM_APPDEST}/cmd/main" stop
+    "${TRIM_APPDEST}/cmd/main" start
+fi
+exit 0

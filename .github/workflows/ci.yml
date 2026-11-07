@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          check-latest: true
+          cache-dependency-path: src/go.sum
+
+      - name: gofmt
+        run: |
+          out="$(gofmt -l src/)"
+          if [ -n "$out" ]; then echo "需要 gofmt:"; echo "$out"; exit 1; fi
+
+      - name: go vet
+        working-directory: src
+        run: go vet ./...
+
+      - name: go test
+        working-directory: src
+        run: go test ./... -count=1
+
+      # City 库 48MB，不随仓库分发。手动触发 workflow 时才下载并跑完整地理单测；
+      # 平时 m13_test.go 检测到缺库会 t.Skip，不影响 CI。
+      - name: 完整地理单测（需 City 库）
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          ./scripts/fetch_geo.sh
+          cd src && go test ./... -count=1 -run 'TestGeo' -v
+
+  build:
+    name: build fpk (arm + x86)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          check-latest: true
+          cache-dependency-path: src/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 安装钩子必须是 LF
+        run: |
+          if grep -rl $'\r' pkg/fnnetmon/cmd/ 2>/dev/null; then
+            echo "cmd/ 安装钩子含 CRLF，装上会执行失败"; exit 1
+          fi
+
+      - name: 双平台打包
+        run: ./build.sh both
+
+      - name: 拆包校验
+        run: |
+          python3 - <<'PY'
+          import glob, hashlib, io, json, os, re, tarfile
+
+          files = sorted(glob.glob('pkg/fnnetmon_0.*_*.fpk'))
+          assert len(files) == 2, '应该产出两个 fpk，实际: %r' % files
+          for p in files:
+              plat = 'arm' if p.endswith('_arm.fpk') else 'x86'
+              machine = b'\xb7\x00' if plat == 'arm' else b'\x3e\x00'
+              with tarfile.open(p, 'r:gz') as t:
+                  mf = t.extractfile('manifest').read().decode()
+                  kv = dict(l.split('=', 1) for l in mf.splitlines() if '=' in l)
+                  kv = {k.strip(): v.strip() for k, v in kv.items()}
+                  inner = t.extractfile('app.tgz').read()
+                  assert kv['checksum'] == hashlib.md5(inner).hexdigest(), p + ': checksum 不符'
+                  assert kv['arch'] == ('aarch64' if plat == 'arm' else 'x86_64'), p + ': arch 不符'
+                  assert kv['platform'] == plat, p + ': platform 不符'
+                  init = t.extractfile('cmd/install_init').read().decode()
+                  assert '仅支持 ARM64' not in init, p + ': install_init 又写死了 ARM64'
+                  with tarfile.open(fileobj=io.BytesIO(inner), mode='r:gz') as a:
+                      elf = a.extractfile('bin/fnnetmon').read()
+                      assert elf[:4] == b'\x7fELF' and elf[18:20] == machine, p + ': ELF 架构不符'
+                      cfg = json.loads(a.extractfile('ui/config').read())
+                      cfg = cfg.get('.url', cfg)
+                      assert cfg['fnnetmon.main']['port'] == '18089', p + ': 桌面入口端口不对'
+              print('  OK %-40s %10d B' % (p, os.path.getsize(p)))
+          # 打包过程临时改了 manifest，必须还原成仓库里的 arm 默认值
+          src = open('pkg/fnnetmon/manifest').read()
+          assert re.search(r'^platform\s*=\s*arm\s*$', src, re.M), 'manifest platform 没还原'
+          assert re.search(r'^arch\s*=\s*aarch64\s*$', src, re.M), 'manifest arch 没还原'
+          print('拆包校验通过，manifest 已还原')
+          PY
+
+      - name: 上传 fpk
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnnetmon-fpk
+          path: pkg/*.fpk
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: attach fpk to release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fnnetmon-fpk
+          path: dist-release
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*.fpk
+          generate_release_notes: true

@@ -1,0 +1,2612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>流量哨兵</title>
+<style>
+:root{
+  --bg:#f3f5f7; --card:#fff; --card2:#fafbfc; --line:#e6e9ee; --line2:#d5dae1;
+  --text:#151a20; --sub:#5d6672; --faint:#6b7480;
+  --accent:#2563c9; --accent-bg:#e9f1fd;
+  --up:#c2410c; --down:#0d7a5f;
+  --ok:#0d7a5f; --warn:#9a5b06; --bad:#b3261e;
+  --ok-bg:#e4f4ee; --warn-bg:#fdf2e0; --bad-bg:#fceceb;
+  --bar:#5b8fd0;
+  --sh:0 1px 2px rgba(16,24,40,.04);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121417; --card:#1b1e23; --card2:#20242a; --line:#2a2f36; --line2:#39404a;
+    --text:#e8eaee; --sub:#9ba3ae; --faint:#8b939e;
+    --accent:#7cabea; --accent-bg:#17293f;
+    --up:#f0997b; --down:#5cc9a3;
+    --ok:#5cc9a3; --warn:#e8a33d; --bad:#f08b85;
+    --ok-bg:#14302a; --warn-bg:#2f2515; --bad-bg:#34191a;
+    --bar:#4a7fbe;
+    --sh:0 1px 2px rgba(0,0,0,.3);
+  }
+}
+/* ---------- 字号只有五档，别再插小数 ----------
+   10px  徽标      底栏角标、国家码 chip（再小就糊成一团）
+   11px  辅助      表头、副行、标签、图例、KPI 说明、时间戳
+   12px  正文      表格、tab、按钮、提示、toast
+   13px  基础      body 继承、移动端标题
+   14px+ 标题/数值 卡片标题 14、顶栏速率 16、KPI 23（移动端 19）
+
+   原来是 9.5 / 10 / 10.5 / 11 / 11.5 / 12.5 / 13.5 混着用，
+   同一个「副行」在 KPI 卡、表格、图例里能出现三种大小，
+   整页看起来毛糙。现在按「角色」定档，改字号只改这一处注释。 */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+/* 手动主题：属性选择器优先级高于 :root，能压过 media query。
+   默认（auto）什么都不设，跟着系统走。 */
+:root[data-theme="dark"]{
+  --bg:#121417; --card:#1b1e23; --card2:#20242a; --line:#2a2f36; --line2:#39404a;
+  --text:#e8eaee; --sub:#9ba3ae; --faint:#8b939e;
+  --accent:#7cabea; --accent-bg:#17293f;
+  --up:#f0997b; --down:#5cc9a3;
+  --ok:#5cc9a3; --warn:#e8a33d; --bad:#f08b85;
+  --ok-bg:#14302a; --warn-bg:#2f2515; --bad-bg:#34191a;
+  --bar:#4a7fbe;
+  --sh:0 1px 2px rgba(0,0,0,.3);
+}
+:root[data-theme="light"]{
+  --bg:#f3f5f7; --card:#fff; --card2:#fafbfc; --line:#e6e9ee; --line2:#d5dae1;
+  --text:#151a20; --sub:#5d6672; --faint:#6b7480;
+  --accent:#2563c9; --accent-bg:#e9f1fd;
+  --up:#c2410c; --down:#0d7a5f;
+  --ok:#0d7a5f; --warn:#9a5b06; --bad:#b3261e;
+  --ok-bg:#e4f4ee; --warn-bg:#fdf2e0; --bad-bg:#fceceb;
+  --bar:#5b8fd0;
+  --sh:0 1px 2px rgba(16,24,40,.04);
+}
+body{
+  background:var(--bg); color:var(--text);
+  font:13px/1.55 system-ui,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+h1,h2,h3{margin:0;font-weight:600}
+a{color:inherit}
+button{font:inherit;color:inherit}
+.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;font-size:11px}
+.num{font-variant-numeric:tabular-nums}
+.hide{display:none!important}
+
+/* ---------- 顶栏 ---------- */
+.stickytop{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line)}
+.hdr{
+  background:var(--card);
+  display:flex;align-items:center;gap:16px;
+  padding:10px 20px;padding-top:calc(10px + env(safe-area-inset-top));
+}
+.brand{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;white-space:nowrap}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none;
+  box-shadow:0 0 0 3px rgba(13,122,95,.18)}
+.pulse.err{background:var(--bad);box-shadow:0 0 0 3px rgba(179,38,30,.18)}
+.rates{display:flex;gap:6px;align-items:center}
+.rate{display:flex;align-items:baseline;gap:6px;padding:4px 10px;border-radius:9px;background:var(--card2);white-space:nowrap}
+.rate .ar{font-size:12px;color:var(--sub);line-height:1}
+.rate .v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+.rate .k{font-size:11px;color:var(--sub)}
+.rate.up .v{color:var(--up)} .rate.dn .v{color:var(--down)}
+.rate.up .ar{color:var(--up)} .rate.dn .ar{color:var(--down)}
+.grow{flex:1}
+.meta{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---------- 标签栏 ---------- */
+.tabs{
+  background:var(--card);
+  display:flex;gap:4px;padding:8px 16px;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+.tabs::-webkit-scrollbar{display:none}
+.tab{
+  flex:none;padding:6px 14px;border-radius:9px;font-size:12px;color:var(--sub);
+  cursor:pointer;user-select:none;white-space:nowrap;transition:background .14s,color .14s;
+  display:flex;align-items:center;gap:6px;
+}
+.tab:hover{background:var(--card2);color:var(--text)}
+.tab.on{background:var(--accent-bg);color:var(--accent);font-weight:500}
+.badge{
+  min-width:17px;height:17px;line-height:17px;padding:0 5px;border-radius:9px;
+  background:var(--bad);color:#fff;font-size:10px;text-align:center;font-weight:500;
+  font-variant-numeric:tabular-nums;
+}
+.badge:empty{display:none}
+
+/* ---------- 布局 ---------- */
+.wrap{max-width:1320px;margin:0 auto;padding:16px 20px 56px}
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:16px 18px;margin-bottom:14px;box-shadow:var(--sh);
+}
+.card>h2{
+  font-size:12px;font-weight:600;color:var(--sub);letter-spacing:.02em;
+  margin:0 0 12px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+}
+.card>h2 .sub{font-weight:400;color:var(--faint)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.grid2>*{margin-bottom:0}
+
+/* ---------- KPI ---------- */
+/* 两张卡，不是三张。原来「活跃连接」「容器」各占一格，每格只有一个 23px 的数字，
+   网格又把它们拉到和曲线卡一样高，于是底部空出四成——不是留白，是没东西可放。
+   并成一张双指标卡后，把原本挤在副行里的事实（无主 socket / veth 映射 /
+   UDP 无计数）摊成底部一行，高度自然补齐，信息也比原来多。
+   两张卡都是 flex 列，曲线和事实行用 margin-top:auto 贴底，永远不会有「半截空」。 */
+.kpis{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(0,1fr);gap:12px;margin-bottom:14px}
+.kpi{
+  background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;
+  box-shadow:var(--sh);display:flex;flex-direction:column;
+}
+.kpi .k{font-size:11px;color:var(--sub);margin-bottom:6px}
+.kpi .v{font-size:23px;font-weight:600;letter-spacing:-.4px;font-variant-numeric:tabular-nums;line-height:1.2}
+.kpi .s{font-size:11px;color:var(--faint);margin-top:4px}
+.kpi.dn .v{color:var(--down)} .kpi.up .v{color:var(--up)}
+/* 上下行合成一张卡：两条曲线共用一个纵轴，量级差多少一眼能看出来。
+   分成两张卡各画各的，会让「上行只有下行 1%」这件事看起来像两个差不多的数。 */
+.kpi .kv{display:flex;gap:26px;flex-wrap:wrap}
+.kpi .v.dn{color:var(--down)} .kpi .v.up{color:var(--up)}
+.kpi.dual .spark{height:42px;margin-top:auto}
+/* 底部事实行：分隔线之上是主指标，之下是「解释主指标的那些数」。
+   塞进副行会让副行换行、把卡片撑高；铺成一行既稳又一眼扫得完。 */
+.kpi .kfacts{
+  display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:auto;padding-top:10px;
+  border-top:1px solid var(--line);font-size:11px;color:var(--faint);
+}
+.kpi .kfacts b{font-weight:500;color:var(--sub);font-variant-numeric:tabular-nums}
+.kpi .kfacts b.warn{color:var(--warn)}
+
+/* ---------- 表格 ---------- */
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.tbl thead th{
+  text-align:left;font-weight:500;color:var(--sub);font-size:11px;
+  padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;
+  background:var(--card);
+}
+.tbl thead th.s{cursor:pointer;user-select:none}
+.tbl thead th.s:hover{color:var(--text)}
+.tbl thead th.on{color:var(--accent)}
+.tbl th.growcol,.tbl td.growcol{width:100%}
+.tbl tbody td{
+  padding:7px 10px;border-bottom:1px solid var(--line);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
+}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:var(--card2)}
+.tbl td.r{text-align:right;font-variant-numeric:tabular-nums}
+.tbl td.wrap{white-space:normal}
+.pname{font-weight:500}
+.sub{color:var(--faint);font-size:11px}
+/* 副行固定一行：路径再长也截断，不许换行——换行会把这一行撑高，
+   同页里就出现 37px / 52px 两种行高。完整路径在 title 里。 */
+.psub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.psub .sep{margin:0 5px;color:var(--line2)}
+.tag{
+  display:inline-block;padding:0 6px;border-radius:5px;font-size:11px;
+  background:var(--accent-bg);color:var(--accent);margin-left:5px;vertical-align:1px;
+}
+/* 灰色标签：本机回环、未归因这类「不算数但要说清楚」的标记 */
+.tag-q{background:var(--card2);color:var(--faint);border:1px solid var(--line)}
+.dom{color:var(--text)}
+.dom em{font-style:normal;color:var(--faint);font-size:11px;margin-left:3px}
+.cc{
+  display:inline-block;padding:0 5px;border-radius:4px;font-size:10px;font-weight:500;
+  background:var(--card2);color:var(--sub);border:1px solid var(--line);vertical-align:1px;
+}
+.pill{display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;white-space:nowrap}
+.pill.on{background:var(--ok-bg);color:var(--ok)}
+.pill.off{background:var(--card2);color:var(--sub);border:1px solid var(--line)}
+.pill.err{background:var(--bad-bg);color:var(--bad)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+/* 没有轨道的裸条（概览的「谁在跑流量」、历史页的占比）。
+   --bar 原来是 #a9c8ef，白底上只有 1.7:1，等于看不见；
+   现在压到 3.3:1，仍比 --accent 浅一档，保留「填充」的观感。
+   带轨道的 .track 用的是 --accent，两种条不要混用。 */
+.bar{height:5px;background:var(--bar);border-radius:3px;min-width:2px}
+.empty{padding:34px 16px;text-align:center;color:var(--faint);font-size:12px;line-height:1.8}
+.newrow td{background:var(--accent-bg)}
+
+/* ---------- 排行 ---------- */
+.appic{
+  width:22px;height:22px;border-radius:7px;flex:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  color:#fff;font-size:12px;font-weight:600;line-height:1;letter-spacing:0;
+}
+/* 未归因不是应用，给它一个描边的问号，别和真实应用抢眼 */
+.appic.q{background:var(--card2);color:var(--faint);border:1px dashed var(--line);font-weight:500}
+/* 表格单元格里内联的图标：和文字基线对齐，右边留条缝 */
+.appic.inl{margin-right:7px;vertical-align:-6px}
+.chev{
+  display:inline-block;width:13px;height:13px;flex:none;position:relative;
+  color:var(--sub);transition:transform .14s;cursor:pointer;user-select:none;
+}
+/* 用 CSS 画三角形。真机截图里这一列全是小圆点：fnOS 的 WebView 没有
+   ▸(U+25B8) 这个字形，退化成一个点，展开和折叠看起来一模一样。 */
+.chev::before{
+  content:'';position:absolute;left:4px;top:3.5px;
+  border-left:5px solid currentColor;
+  border-top:4px solid transparent;
+  border-bottom:4px solid transparent;
+}
+.chev.on{transform:rotate(90deg);color:var(--accent)}
+.chev.ghost{visibility:hidden;cursor:default}
+.nmwrap{display:flex;align-items:center;gap:8px;min-width:0}
+.nmwrap.xp{cursor:pointer}
+.nmwrap.xp:hover .pname{color:var(--accent)}
+.nmtext{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.nmtext .pname{display:block;line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+.kidrow td{background:var(--card2)}
+.kidrow .nmwrap{padding-left:21px}
+.kidrow .pname{font-weight:400;color:var(--sub)}
+.track{height:6px;border-radius:3px;background:var(--line);overflow:hidden;min-width:48px}
+.track i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+.pct{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums;margin-left:auto;padding-left:7px}
+tr.zero td{opacity:.42}
+tr.zero:hover td{opacity:.72}
+
+/* 概览页的 TOP 列表 */
+.toplist{display:flex;flex-direction:column;gap:1px;max-width:880px}
+.toprow{
+  display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:10px;
+  text-decoration:none;color:inherit;transition:background .12s;
+}
+.toprow:hover{background:var(--card2)}
+.topmain{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.35}
+.topmain .pname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 副行也只许一行：未归因那行的说明有「找不到主人的流量 · UDP 50.8 KB/s · 内核转发…」
+   这么长，允许换行会把 320px 下的行撑成四行，速率数字被挤到下面去。 */
+.topmain .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 速率块不许被压缩：它没有 min-width，flex 会把它挤到比内容还窄，
+   数字直接溢出到左边的名字上（截图里「transmission↓ 976.6 KB/s」就是这个）。 */
+.toprates{display:flex;gap:11px;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.topbar{width:112px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;flex:none}
+.topbar i{display:block;height:100%;border-radius:3px;background:var(--accent);min-width:2px}
+/* 未归因那一行：存在感要有，但不能看起来像个正常应用 */
+.toprow-q .topbar i{background:var(--faint)}
+.toprow-q .pname{color:var(--sub);font-weight:400}
+.topfoot{margin:9px 0 0 9px;line-height:1.7}
+
+/* ---------- 控件 ---------- */
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+input[type=search],input[type=text],select{
+  padding:7px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--card2);color:var(--text);font:inherit;font-size:12px;outline:none;
+}
+input[type=search]{flex:1;min-width:150px;max-width:340px}
+/* Webhook 地址很长，默认 20 字符宽会把 URL 切掉一半，看起来像坏了 */
+.toolbar input.grow{flex:1;min-width:200px;max-width:none}
+input:focus,select:focus{border-color:var(--accent);background:var(--card)}
+.chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--accent);margin:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card2)}
+.seg b{
+  padding:5px 12px;font-weight:400;font-size:12px;color:var(--sub);cursor:pointer;
+  border-right:1px solid var(--line);user-select:none;white-space:nowrap;
+}
+.seg b:last-child{border-right:0}
+.seg b.on{background:var(--accent-bg);color:var(--accent);font-weight:500}
+.btn{
+  padding:6px 13px;border:1px solid var(--line);border-radius:9px;font-size:12px;
+  background:var(--card);cursor:pointer;white-space:nowrap;text-decoration:none;
+  display:inline-flex;align-items:center;gap:5px;transition:border-color .14s,color .14s,background .14s;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.sm{padding:3px 9px;font-size:11px;border-radius:7px}
+.btn.ok{color:var(--ok);border-color:var(--ok)}
+.btn.ok:hover{background:var(--ok-bg)}
+.btn.bad{color:var(--bad);border-color:var(--bad)}
+.btn.bad:hover{background:var(--bad-bg)}
+.btn.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+.btn.danger:hover{opacity:.9;color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.switch{position:relative;display:inline-block;width:40px;height:22px;flex:none;vertical-align:middle}
+.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;background:var(--line2);border-radius:11px;transition:.18s;cursor:pointer}
+.switch span:before{
+  content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;
+  background:#fff;border-radius:50%;transition:.18s;box-shadow:0 1px 3px rgba(0,0,0,.28);
+}
+.switch input:checked+span{background:var(--bad)}
+.switch input:checked+span:before{transform:translateX(18px)}
+.switch input:disabled+span{opacity:.4;cursor:not-allowed}
+
+/* ---------- 状态块 ---------- */
+.statline{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:11px;
+  border:1px solid var(--line);background:var(--card2);margin-bottom:12px}
+.statline .t{font-weight:500;white-space:nowrap}
+.statline .d{font-size:11px;color:var(--sub);flex:1;min-width:0;line-height:1.5}
+.warnbox{
+  padding:11px 14px;border-radius:11px;background:var(--warn-bg);color:var(--warn);
+  font-size:12px;line-height:1.75;margin-bottom:12px;
+}
+.warnbox b{font-weight:600}
+.warnbox code{background:rgba(127,127,127,.16);padding:1px 5px;border-radius:4px;
+  font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.banner{background:var(--bad-bg);color:var(--bad);padding:9px 18px;font-size:12px;display:none}
+.scgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+.scitem{padding:10px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line)}
+.scitem .k{font-size:11px;color:var(--sub);margin-bottom:3px}
+.scitem .v{font-size:14px;font-weight:500;font-variant-numeric:tabular-nums}
+.scitem .n{font-size:11px;color:var(--faint);margin-top:4px;line-height:1.5}
+.scitem.warn{border-color:var(--warn)}
+.scitem.warn .v{color:var(--warn)}
+.scitem.bad{border-color:var(--bad)}
+.scitem.bad .v{color:var(--bad)}
+/* 省市数据安装进度：只有一条 5px 的条，够看出「在动」就行 */
+.gbar{height:4px;background:var(--bar);border-radius:3px;overflow:hidden;margin-top:7px}
+.gbar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .4s}
+.geoact{display:flex;align-items:center;gap:7px;margin-top:7px;flex-wrap:wrap}
+
+/* ---------- 图表 ---------- */
+.chartwrap{position:relative;height:320px;margin-top:4px;touch-action:pan-y}
+.chartwrap canvas{display:block;width:100%;height:100%}
+.tip{
+  position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line2);
+  border-radius:10px;padding:8px 11px;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.16);
+  display:none;white-space:nowrap;z-index:5;min-width:140px;
+}
+.tip .hd{color:var(--faint);font-size:11px;margin-bottom:5px}
+.tip .r{display:flex;gap:12px;justify-content:space-between;line-height:1.7}
+.tip .r b{font-weight:500}
+.tip .sw{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px;vertical-align:middle}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px;font-size:11px;color:var(--sub)}
+.legend .it{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.legend .it.off{opacity:.34}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+/* ---------- 提示 ---------- */
+.toast{
+  position:fixed;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(12px);
+  background:var(--text);color:var(--card);padding:10px 18px;border-radius:10px;
+  font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:99;
+  max-width:min(560px,88vw);line-height:1.5;
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- 移动端 ---------- */
+@media (max-width: 900px){
+  .grid2{grid-template-columns:1fr}
+}
+@media (max-width: 760px){
+  .hdr{padding:9px 12px;gap:10px;flex-wrap:nowrap}
+  .brand{font-size:13px;gap:7px}
+  .rate{padding:4px 8px;gap:5px}
+  .rate .v{font-size:15px}
+  .rate .k{display:none}
+  .meta{display:none}
+  .tabs{padding:7px 12px}
+  .tab{padding:6px 12px;font-size:12px}
+  .wrap{padding:12px 12px 48px}
+  .card{padding:13px 13px;border-radius:13px}
+  .kpis{grid-template-columns:1fr;gap:9px}
+  .kpi{padding:11px 12px;border-radius:12px}
+  .kpi .v{font-size:19px}
+  .kpi .kv{gap:18px}
+  .chartwrap{height:240px}
+
+  /* 表格转卡片 */
+  .tbl thead{display:none}
+  .tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:auto}
+  .tbl tbody tr{
+    border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+    margin-bottom:9px;background:var(--card);
+  }
+  .tbl tbody tr:hover td{background:transparent}
+  .tbl tbody tr.newrow{background:var(--accent-bg);border-color:var(--accent)}
+  .tbl tbody tr.newrow td{background:transparent}
+  /* 标签用绝对定位放在左侧留白里，单元格内容照常按块流排。
+     试过 flex 和 grid：flex 把每个行内子元素当成并列项顶出屏幕，
+     grid 会把多余子元素自动排到第二行，都会把卡片撑爆。
+
+     text-align 必须显式写 left：::before 会继承 td 的对齐方式，而数字列
+     是 text-align:right，标签跟着右对齐，就和「占比」那种左对齐的列错开了
+     ——截图里「发送/接收/合计」比「占比」往右缩进一格就是这个原因。 */
+  .tbl tbody td{
+    position:relative;border:0;padding:3px 0 3px 82px;display:block;
+    white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;
+  }
+  /* 桌面端用内联 width 定列宽，卡片布局下必须让位，否则固定宽度的列会挤爆卡片 */
+  .tbl tbody td[style]{width:auto!important;min-width:0!important}
+  .tbl tbody td::before{
+    content:attr(data-l);position:absolute;left:0;top:3px;width:72px;
+    color:var(--sub);font-size:11px;font-weight:400;line-height:1.5;
+    text-align:left;
+  }
+  .tbl tbody td.m-head{
+    display:block;font-size:14px;font-weight:500;padding:0 0 8px;margin-bottom:7px;
+    border-bottom:1px dashed var(--line);text-align:left;
+  }
+  .tbl tbody td.m-head::before{display:none}
+  .tbl tbody td.m-head::before{display:none}
+  .tbl tbody td.m-hide{display:none}
+  .tbl tbody td.r{text-align:right}
+  .tbl tbody td.acts{
+    display:flex;justify-content:flex-end;align-items:center;gap:7px;
+    padding:9px 0 0;margin-top:5px;border-top:1px dashed var(--line);flex-wrap:wrap;
+  }
+  .tbl tbody td.acts::before{display:none}
+  /* 触控目标：这些按钮原来只有 26px 高，而「阻止 IP / 阻止域名」是破坏性操作，
+     手指按偏的代价太大。撑到 40px，三个按钮仍然排得下一行。 */
+  .btn.sm{min-height:40px;padding:8px 12px;font-size:12px}
+  .empty{padding:26px 12px}
+
+  /* 网卡一行在 390px 下放不下：把累计挪到第二行，别让整页被撑宽 */
+  .ifrow{flex-wrap:wrap;gap:5px 8px;padding:9px 2px}
+  .ifacc{flex-basis:100%;padding-left:14px;order:5}
+  .ifname{max-width:44vw}
+
+  /* 排行卡片：小屏去掉占比条，把数值让出来 */
+  .topbar{display:none}
+  .toprates{font-size:11px;gap:8px}
+  .toprow{padding:7px 6px;gap:8px}
+  .track{display:none}
+  .pct{margin-left:auto}
+  .kidrow .nmwrap{padding-left:14px}
+  /* 子行卡片整体缩进，否则父行和子行看起来是同级 */
+  .tbl tbody tr.kidrow{margin-left:14px;background:var(--card2)}
+
+  /* ---------- 排行页移动端：5 行压成 3 行 ----------
+     原来每个应用是「名称 / 发送 / 接收 / 合计 / 占比」五行，390px 一屏只放得下 3 个，
+     而「一眼看出谁在偷跑」正是这一页的全部意义。
+     这里在卡片上显式摆位：名称+合计 / 占比条 / ↓↑。
+     只作用于 #rankBox——外联、拦截那些表字段长短不一，还是「每字段一行」的块布局更稳。 */
+  #rankBox .tbl tbody tr{
+    display:grid;grid-template-columns:minmax(0,1fr) auto;
+    align-items:center;gap:7px 10px;padding:10px 12px;
+  }
+  #rankBox .tbl tbody td{padding:0;min-width:0;overflow:visible}
+  #rankBox .tbl tbody td::before{display:none}
+  #rankBox .tbl tbody td.m-head{
+    grid-column:1;grid-row:1;border:0;margin:0;padding:0;font-size:14px;
+    /* 名字和副行都锁成一行、超出打省略号。
+       允许换行的话，320px 下 transmission-daemon 占两行、容器 + veth 占三行，
+       一张卡从 78px 长到 159px，一屏只剩两个半——这一页存在的意义就是一眼扫完。 */
+    min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  }
+  #rankBox .tbl tbody td.m-head .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #rankBox .tbl tbody td[data-k="tot"]{
+    grid-column:2;grid-row:1;text-align:right;font-weight:500;font-size:14px;
+  }
+  #rankBox .tbl tbody td[data-k="bar"]{grid-column:1/-1;grid-row:2}
+  #rankBox .tbl tbody td[data-k="rx"]{grid-column:1;grid-row:3;text-align:left;font-size:12px}
+  #rankBox .tbl tbody td[data-k="tx"]{grid-column:2;grid-row:3;text-align:right;font-size:12px}
+  /* 标签换成箭头、改回行内，省掉两行文字也省掉左侧留白 */
+  #rankBox .tbl tbody td[data-k="rx"]::before,
+  #rankBox .tbl tbody td[data-k="tx"]::before{
+    display:inline;position:static;width:auto;font-size:12px;
+  }
+  #rankBox .tbl tbody td[data-k="rx"]::before{content:"↓ "}
+  #rankBox .tbl tbody td[data-k="tx"]::before{content:"↑ "}
+  /* 占比条在卡片里要显示出来（.track 上面被全局隐藏了） */
+  #rankBox .track{display:block}
+  .tbl tbody tr.kidrow td{background:transparent}
+}
+
+/* 窄屏（≤380px）顶栏：品牌 + 两个速率块 + 主题按钮本来就快放不下，
+   一到 360px 速率块就会被挤得内部换行，变成两个 53px 高的双行块，
+   整个顶栏撑到 71px。这里缩字号和留白，让它保持在 48px 一行。 */
+@media (max-width:380px){
+  .hdr{gap:10px;padding-left:12px;padding-right:12px}
+  .brand{font-size:13px;gap:7px}
+  .rate{padding:3px 7px;gap:4px}
+  .rate .v{font-size:13px}
+  .rate .ar{font-size:11px}
+}
+/* 320px（iPhone SE 一代）还得再挤一点，否则整页横向溢出 10px。
+   速率块设了 nowrap 之后不会再内部换行，只能从字号和留白里抠。 */
+@media (max-width:340px){
+  .hdr{gap:8px;padding-left:10px;padding-right:10px}
+  .rates{gap:4px}
+  .rate{padding:2px 6px;gap:3px}
+  .rate .v{font-size:12px}
+}
+/* ---------- 主题按钮 ---------- */
+.iconbtn{
+  width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:9px;background:var(--card);
+  color:var(--sub);cursor:pointer;flex:none;transition:color .14s,border-color .14s;
+}
+.iconbtn:hover{color:var(--accent);border-color:var(--accent)}
+.iconbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- 迷你趋势线 ---------- */
+.spark{height:32px;margin-top:7px;opacity:.9}
+.spark svg{display:block;width:100%;height:100%}
+
+/* ---------- 网卡列表（一行一条，比表格省地方） ---------- */
+.iflist{display:flex;flex-direction:column}
+.ifrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
+.ifrow:last-child{border-bottom:0}
+.ifdot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.ifdot.off{background:var(--faint)}
+.ifname{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ifspd{font-size:11px;color:var(--faint);white-space:nowrap}
+.ifacc{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ifrates{margin-left:auto;display:flex;gap:13px;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---------- 连接页：按应用分组 ---------- */
+.grpcell{display:flex;align-items:center;gap:9px}
+.grpcell .pname{font-weight:600}
+.grpcell .cnt{font-size:11px;color:var(--faint)}
+.grpcell .grate{margin-left:auto;display:flex;gap:13px;font-size:12px;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.grprow td{background:var(--card2);cursor:pointer;border-bottom:1px solid var(--line)}
+tr.grprow:hover td{background:var(--accent-bg)}
+tr.grprow .chev{vertical-align:-2px;margin-right:1px}
+tr.child td:first-child{padding-left:30px}
+/* 移动端 .tbl tbody tr{display:block} 在后面，同优先级会赢，所以这里必须 !important */
+.tbl tbody tr.child.hide{display:none!important}
+.grpfoot{display:flex;gap:10px;align-items:center;margin-top:4px}
+
+/* ---------- 骨架屏 ---------- */
+.sk{background:linear-gradient(90deg,var(--card2) 25%,var(--line) 37%,var(--card2) 63%);
+  background-size:400% 100%;animation:shimmer 1.4s ease-in-out infinite;border-radius:7px;height:12px}
+@keyframes shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+.skcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+.skcard .sk+ .sk{margin-top:10px}
+
+/* ---------- 移动端底部导航 ---------- */
+.tabbar{display:none}
+.sheet{display:none}
+@media (max-width:760px){
+  .tabs{display:none}
+  .tabbar{
+    position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;
+    background:var(--card);border-top:1px solid var(--line);
+    padding:5px 6px calc(5px + env(safe-area-inset-bottom));
+    box-shadow:0 -1px 0 var(--line), 0 -8px 24px rgba(16,24,40,.05);
+  }
+  .tabbar .tb{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    padding:5px 2px;border-radius:10px;color:var(--sub);font-size:10px;
+    cursor:pointer;user-select:none;position:relative;min-height:44px;
+  }
+  .tabbar .tb.on{color:var(--accent);background:var(--accent-bg)}
+  .tabbar .tb svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round}
+  .tabbar .tb .dot{
+    position:absolute;top:2px;right:calc(50% - 17px);min-width:15px;height:15px;line-height:15px;
+    border-radius:8px;background:var(--bad);color:#fff;font-size:10px;text-align:center;padding:0 4px;
+  }
+  .tabbar .tb .dot:empty{display:none}
+  body{padding-bottom:calc(66px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(80px + env(safe-area-inset-bottom))}
+  .sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.32);display:none}
+  .sheet.on{display:block;animation:fade .16s}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .sheet .in{
+    position:absolute;left:0;right:0;bottom:0;background:var(--card);
+    border-radius:18px 18px 0 0;padding:10px 12px calc(16px + env(safe-area-inset-bottom));
+    display:flex;flex-direction:column;gap:3px;
+    box-shadow:0 -8px 32px rgba(0,0,0,.22);animation:up .2s ease-out;
+  }
+  @keyframes up{from{transform:translateY(14px)}to{transform:translateY(0)}}
+  .sheet .ttl{font-size:11px;color:var(--faint);padding:8px 12px 4px}
+  .sheet .it{
+    padding:13px 12px;border-radius:11px;font-size:14px;display:flex;align-items:center;gap:11px;
+    cursor:pointer;user-select:none;
+  }
+  .sheet .it:hover,.sheet .it:active{background:var(--card2)}
+  .sheet .it .sub{margin-left:auto;font-size:12px}
+  /* 窄屏上 min-width 会把工具栏顶到换行，宁可让输入框自己缩 */
+  .toolbar input.grow{min-width:0}
+}
+</style>
+</head>
+<body>
+
+<div class="stickytop">
+<header class="hdr">
+  <div class="brand"><span class="pulse" id="pulse"></span>流量哨兵</div>
+  <div class="rates">
+    <div class="rate dn"><span class="ar">↓</span><span class="v" id="rxr">–</span><span class="k">下行</span></div>
+    <div class="rate up"><span class="ar">↑</span><span class="v" id="txr">–</span><span class="k">上行</span></div>
+  </div>
+  <div class="grow"></div>
+  <div class="meta" id="meta">–</div>
+  <button class="iconbtn" id="themebtn" title="切换主题（自动 / 浅色 / 深色）" aria-label="切换主题">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.2 12H2M22 12h-2.2M5.9 5.9 4.4 4.4M19.6 19.6l-1.5-1.5M18.1 5.9l1.5-1.5M4.4 19.6l1.5-1.5"/></svg>
+  </button>
+</header>
+
+<nav class="tabs" id="tabs">
+  <div class="tab on" data-t="ov">概览</div>
+  <div class="tab" data-t="rank">排行</div>
+  <div class="tab" data-t="conn">连接</div>
+  <div class="tab" data-t="cont">容器</div>
+  <div class="tab" data-t="hist">历史</div>
+  <div class="tab" data-t="peers">外联<span class="badge" id="pbadge"></span></div>
+  <div class="tab" data-t="alert">告警</div>
+  <div class="tab" data-t="fw">拦截</div>
+</nav>
+</div>
+
+<div class="banner" id="banner"></div>
+
+<main class="wrap">
+
+  <section id="view-ov">
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <h2>谁在跑流量 <span class="sub" id="topHint">实时 · 按服务</span></h2>
+      <div id="topBox"></div>
+    </div>
+    <div class="card">
+      <h2>网卡</h2>
+      <div id="ifaceBox"></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <h2>域名归因 <span class="sub" id="dnsHint"></span></h2>
+        <div class="scgrid" id="dnsGrid"></div>
+        <div class="sub" style="margin-top:10px;line-height:1.7" id="dnsNote"></div>
+      </div>
+      <div class="card">
+        <h2>运行状态 <span class="sub" id="schint"></span></h2>
+        <div class="scgrid" id="scgrid"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-conn" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="搜索应用、进程、域名、地址…">
+        <label class="chk"><input type="checkbox" id="cgrp" checked> 按应用分组</label>
+        <label class="chk"><input type="checkbox" id="hideidle" checked> 隐藏空闲</label>
+        <label class="chk"><input type="checkbox" id="hideloop" checked> 隐藏本机回环</label>
+        <span class="sub" id="conncount"></span>
+      </div>
+      <div id="connBox"></div>
+    </div>
+  </section>
+
+  <section id="view-rank" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <div class="seg" id="rby"><b data-v="svc" class="on">服务</b><b data-v="proc">进程</b></div>
+        <div class="seg" id="rwin"><b data-v="live" class="on">实时</b><b data-v="1h">1 小时</b><b data-v="24h">24 小时</b><b data-v="7d">7 天</b></div>
+        <input type="search" id="rq" placeholder="搜索服务、进程…">
+        <span class="sub" id="rhint"></span>
+        <div class="grow"></div>
+        <a class="btn" id="rcsv" href="#" title="把当前区间的汇总导成 CSV（含占比）">导出 CSV</a>
+      </div>
+      <div id="rankBox"></div>
+      <div class="sub" id="rnote" style="margin-top:10px;line-height:1.7"></div>
+    </div>
+  </section>
+
+  <section id="view-cont" class="hide">
+    <div class="card">
+      <h2>按容器 <span class="sub">基于宿主机 veth 字节统计，含 UDP</span> <span class="sub" id="conthint"></span></h2>
+      <div id="contBox"></div>
+    </div>
+  </section>
+
+  <section id="view-hist" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <div class="seg" id="hrange">
+          <b data-v="1h">1 小时</b><b data-v="6h">6 小时</b><b data-v="24h" class="on">24 小时</b><b data-v="7d">7 天</b><b data-v="30d">30 天</b>
+        </div>
+        <div class="seg" id="hdim">
+          <b data-v="total">总量</b><b data-v="svc" class="on">应用</b><b data-v="proc">进程</b><b data-v="cont">容器</b><b data-v="iface">网卡</b>
+        </div>
+        <div class="seg" id="hdir">
+          <b data-v="total" class="on">合计</b><b data-v="rx">下行</b><b data-v="tx">上行</b>
+        </div>
+        <div class="seg" id="hscale">
+          <b data-v="lin" class="on">线性</b><b data-v="log">对数</b>
+        </div>
+        <div class="grow"></div>
+        <a class="btn" id="hcsv" href="#" title="导出当前区间、当前维度的时序明细">导出 CSV</a>
+      </div>
+      <div class="chartwrap"><canvas id="hchart"></canvas><div class="tip" id="htip"></div></div>
+      <div class="legend" id="hlegend"></div>
+      <div class="sub" id="herr" style="margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h2>区间合计 <span class="sub" id="hsum"></span></h2>
+      <div id="hbox"></div>
+    </div>
+  </section>
+
+  <section id="view-peers" class="hide">
+    <div class="card">
+      <div class="toolbar">
+        <input type="search" id="pq" placeholder="搜索进程、域名、地址、ASN…">
+        <label class="chk"><input type="checkbox" id="ponly" checked> 只看未裁决</label>
+        <label class="chk"><input type="checkbox" id="ppriv"> 含内网</label>
+        <span class="sub" id="pcount"></span>
+      </div>
+      <div class="sub" style="margin-bottom:10px;line-height:1.7">
+        记录「谁第一次连了哪个地址」。允许只是记账；阻止会生成规则，需要到「拦截」页打开总开关才真正生效。
+        有域名的行可以按域名阻止 —— CDN 换节点也不会绕过去。
+      </div>
+      <div id="peerBox"></div>
+    </div>
+  </section>
+
+  <section id="view-alert" class="hide">
+    <div class="card">
+      <h2>流量告警 <span class="sub" id="alHint"></span></h2>
+      <div class="toolbar">
+        <label class="chk"><input type="checkbox" id="alOn"> 启用</label>
+        <input type="text" class="grow" id="alHook" placeholder="Webhook 地址（企业微信 / 钉钉 / Slack / 自定义）">
+        <button class="btn" id="alSave">保存</button>
+        <button class="btn" id="alTest">发一条测试</button>
+      </div>
+      <div class="sub" style="line-height:1.75">
+        推送格式按地址自动判断：<code>qyapi.weixin.qq.com</code> 走企业微信、<code>dingtalk</code> 走钉钉、
+        <code>slack.com</code> 走 Slack，其它按通用 JSON（<code>{"text":"…"}</code>）发。
+        告警在本地评估，不会把任何数据发到别处。
+      </div>
+    </div>
+    <div class="card">
+      <h2>规则 <span class="sub" id="alRsub"></span></h2>
+      <div id="alRules"></div>
+      <div class="toolbar" style="margin:12px 0 0">
+        <input type="text" id="alName" placeholder="规则名（可留空）" style="max-width:150px">
+        <input type="text" id="alMatch" placeholder="匹配服务/进程，空=全部" style="max-width:190px">
+        <div class="seg" id="alKind"><b data-v="rate" class="on">速率</b><b data-v="total">累计</b></div>
+        <input type="text" id="alTh" placeholder="阈值" style="max-width:90px">
+        <span class="sub" id="alUnit">KB/s</span>
+        <input type="text" id="alWin" placeholder="窗口分钟" style="max-width:90px;display:none">
+        <button class="btn" id="alAdd">添加规则</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>最近触发 <span class="sub">最多保留 50 条，只在内存里</span></h2>
+      <div id="alEvents"></div>
+    </div>
+  </section>
+
+  <section id="view-fw" class="hide">
+    <div class="card">
+      <h2>出向拦截</h2>
+      <div id="fwbody"></div>
+    </div>
+    <div class="card">
+      <h2>规则 <span class="sub" id="rulesub"></span></h2>
+      <div id="ruleBox"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- 移动端底部导航：顶部横向滚动的 tab 在手机上要滑着找，手指够不到。
+     5 个主入口放底栏，「容器 / 历史 / 拦截 / 主题」收进「更多」。 -->
+<nav class="tabbar" id="tabbar">
+  <div class="tb" data-t="ov">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>
+    <span>概览</span>
+  </div>
+  <div class="tb" data-t="rank">
+    <svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+    <span>排行</span>
+  </div>
+  <div class="tb" data-t="conn">
+    <svg viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9.5"/><path d="M7.8 11.2 5.6 13.4a3.9 3.9 0 0 0 5.5 5.5l2.2-2.2"/><path d="M16.2 12.8l2.2-2.2a3.9 3.9 0 0 0-5.5-5.5l-2.2 2.2"/></svg>
+    <span>连接</span>
+  </div>
+  <div class="tb" data-t="peers">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2M12 3.4c2.4 2.4 3.6 5.3 3.6 8.6s-1.2 6.2-3.6 8.6c-2.4-2.4-3.6-5.3-3.6-8.6S9.6 5.8 12 3.4z"/></svg>
+    <span>外联</span><span class="dot" id="pdot"></span>
+  </div>
+  <div class="tb" data-more="1">
+    <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+    <span>更多</span>
+  </div>
+</nav>
+
+<div class="sheet" id="sheet">
+  <div class="in" id="sheetIn">
+    <div class="ttl">更多</div>
+    <div class="it" data-t="cont">容器<span class="sub">按 veth 统计</span></div>
+    <div class="it" data-t="hist">历史<span class="sub">分钟 / 小时 / 天</span></div>
+    <div class="it" data-t="alert">告警<span class="sub">阈值 + Webhook</span></div>
+    <div class="it" data-t="fw">拦截<span class="sub">nftables</span></div>
+    <div class="it" id="sheetTheme">主题<span class="sub" id="themeNow">跟随系统</span></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ================= 点击时钉住位置 =================
+   列表一增一减，浏览器不会替你保住视觉焦点：折叠一个组、或者裁决掉一行，
+   下面的内容整体上移，刚点的那一行瞬间跑掉，用户得重新找一遍。
+   这里在改 DOM 前后各量一次，差多少补多少——不是禁用滚动，只是把锚点拉回原位。
+
+   scope 用选择器传：重绘会把原来的节点换掉，闭包里的 el 已经脱离文档，
+   只能靠「第几行」在新表里重新定位。 */
+function keepAnchor(el,fn){
+  if(!el){ fn(); return; }
+  const before=el.getBoundingClientRect().top;
+  fn();
+  if(!el.isConnected) return;
+  const d=el.getBoundingClientRect().top-before;
+  if(Math.abs(d)>0.5) window.scrollBy(0,d);
+}
+
+async function pinAfter(scopeSel,el,fn){
+  if(!el){ await fn(); return; }
+  const top=el.getBoundingClientRect().top;
+  const tb=el.closest('tbody');
+  const idx=tb?[...tb.rows].indexOf(el):-1;
+  await fn();
+  const rows=document.querySelectorAll(scopeSel+' tbody tr');
+  if(!rows.length||idx<0) return;
+  // 被点的那行没了，就让「顶替它位置的那一行」停在原地
+  const t=rows[Math.min(idx,rows.length-1)];
+  const d=t.getBoundingClientRect().top-top;
+  if(Math.abs(d)>0.5) window.scrollBy(0,d);
+}
+
+/* ================= 格式化 ================= */
+function bps(n){
+  if(n==null||n<0) return '–';
+  if(n<1024) return Math.round(n)+' B/s';
+  const u=['KB','MB','GB','TB']; let i=-1,x=n;
+  do{ x/=1024; i++; }while(x>=1024&&i<u.length-1);
+  return x.toFixed(x<10?2:1)+' '+u[i]+'/s';
+}
+function bsize(n){
+  if(!n) return '0 B';
+  const u=['B','KB','MB','GB','TB']; let i=0,x=n;
+  while(x>=1024&&i<u.length-1){x/=1024;i++;}
+  return x.toFixed(i?1:0)+' '+u[i];
+}
+function dur(s){
+  s=Math.max(0,Math.floor(s||0));
+  if(s<60) return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m'+(s%60?(s%60)+'s':'');
+  if(s<86400) return Math.floor(s/3600)+'h'+Math.floor(s%3600/60)+'m';
+  return Math.floor(s/86400)+'d'+Math.floor(s%86400/3600)+'h';
+}
+function fmtTime(ts){
+  if(!ts) return '—';
+  const d=new Date(ts*1000), p=n=>String(n).padStart(2,'0');
+  return `${d.getMonth()+1}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function ago(ts){
+  if(!ts) return '—';
+  const s=Date.now()/1000-ts;
+  if(s<60) return '刚刚';
+  if(s<3600) return Math.floor(s/60)+' 分钟前';
+  if(s<86400) return Math.floor(s/3600)+' 小时前';
+  return Math.floor(s/86400)+' 天前';
+}
+
+/* ================= 接口地址 =================
+   入口 URL 是 /app/fnnetmon（无尾斜杠），相对路径会被解析成 /app/api/xxx，
+   所以必须基于 location.pathname 拼绝对地址。 */
+function apiBase(){
+  const p=location.pathname.replace(/\/+$/,'');
+  if(p.startsWith('/app/')) return p+'/api/';
+  return '/api/';
+}
+function apiUrl(){ return apiBase()+'snapshot'; }
+
+async function getJSON(path){
+  const r=await fetch(apiBase()+path,{cache:'no-store'});
+  const txt=await r.text();
+  let j;
+  try{ j=JSON.parse(txt); }
+  catch(e){ throw new Error('返回非 JSON：'+txt.slice(0,140)); }
+  if(j&&j.error) throw new Error(j.error);
+  return j;
+}
+async function postJSON(path,body){
+  const r=await fetch(apiBase()+path,{method:'POST',cache:'no-store',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const txt=await r.text();
+  let j;
+  try{ j=JSON.parse(txt); }
+  catch(e){ throw new Error('返回非 JSON：'+txt.slice(0,140)); }
+  if(j&&j.error) throw new Error(j.error);
+  return j;
+}
+
+let toastTimer=null;
+function toast(msg){
+  const t=$('toast');
+  t.textContent=msg; t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('on'),2800);
+}
+
+/* ================= 通用表格 =================
+   cols: {k, label, cls, head(卡片标题), hideM(窄屏隐藏), sortable, cell(row)}
+   sort: {key, dir} 传入则表头可点排序
+   窄屏时每个 td 用 data-l 显示字段名，整行变成一张卡片。 */
+function renderTable(box, cols, rows, emptyText, sort){
+  // 哪一列吸收多余宽度：默认第一列，也可以用 col.grow 指定
+  let gi=cols.findIndex(c=>c.grow);
+  if(gi<0) gi=0;
+  // 表格是 auto 布局，只给 width 会被内容压回去，min-width 才管用
+  const wOf=c=>c.w?`width:${c.w}px;min-width:${c.w}px;`:'';
+  const th=cols.map((c,i)=>{
+    const cls=[c.cls||'',i===gi?'growcol':''].filter(Boolean).join(' ');
+    const st=wOf(c);
+    if(sort&&c.sortable){
+      const on=sort.key===c.k;
+      return `<th class="s ${cls}${on?' on':''}" ${st?`style="${st}"`:''} data-k="${c.k}">${esc(c.label)}${on?(sort.dir<0?' ↓':' ↑'):''}</th>`;
+    }
+    return `<th class="${cls}" ${st?`style="${st}"`:''}>${esc(c.label)}</th>`;
+  }).join('');
+  if(!rows||!rows.length){
+    box.innerHTML=`<div class="empty">${esc(emptyText||'暂无数据')}</div>`;
+    return;
+  }
+  const body=rows.map(r=>{
+    const tds=cols.map((c,i)=>{
+      const cls=[c.cls||'',i===gi?'growcol':'',c.head?'m-head':'',c.hideM?'m-hide':''].filter(Boolean).join(' ');
+      const st=wOf(c);
+      // data-k 是列 key 的镜像：移动端卡片要按列重排（合计贴右上、占比条独占一行、
+      // 上下行并排），只能靠 key 定位。用 data-l 不行——标签是给人看的文案，会改。
+      return `<td class="${cls}" ${st?`style="${st}"`:''} data-l="${esc(c.label)}"${c.k?` data-k="${esc(c.k)}"`:''}>${c.cell(r)}</td>`;
+    }).join('');
+    return `<tr class="${r.__cls||''}">${tds}</tr>`;
+  }).join('');
+  box.innerHTML=`<table class="tbl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* ================= 顶栏 ================= */
+function renderHeader(d){
+  $('rxr').textContent=bps(d.rx_rate);
+  $('txr').textContent=bps(d.tx_rate);
+  $('pulse').className='pulse';
+  const m=d.meta||{};
+  $('meta').textContent=`连接 ${m.conn_count||0} · 进程 ${m.procs||0} · 扫描 ${(m.scan_ms||0).toFixed(0)}ms · ${d.ts||''}`;
+}
+
+/* ================= 概览 ================= */
+// 60 个采样点的环形缓冲：每秒 push 一次，用来画 KPI 下面的迷你曲线。
+// 只存速率（B/s），不存时间戳——刻度没有意义，看的是形状。
+const SPARK={rx:new Array(60).fill(0),tx:new Array(60).fill(0)};
+function pushSpark(d){
+  SPARK.rx.push(d.rx_rate||0); SPARK.rx.shift();
+  SPARK.tx.push(d.tx_rate||0); SPARK.tx.shift();
+}
+// 上下行画在同一张图里，共用一个纵轴。
+//
+// 各自归一化（各按各的最大值缩放）会把「上行只有下行的 1%」画成两条一样高的线，
+// 那是骗人的。共用纵轴时上行贴着底走，恰好就是事实。
+function drawSparkBoth(el){
+  if(!el) return;
+  const w=320,h=36,n=SPARK.rx.length;
+  const max=Math.max(1,...SPARK.rx,...SPARK.tx);
+  const line=arr=>arr.map((v,i)=>
+    `${(i/(n-1)*w).toFixed(1)},${(h-3-v/max*(h-9)).toFixed(1)}`).join(' ');
+  const rx=line(SPARK.rx), tx=line(SPARK.tx);
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <polygon points="0,${h} ${rx} ${w},${h}" style="fill:var(--down)" opacity=".09"/>
+    <polyline points="${rx}" fill="none" style="stroke:var(--down)" stroke-width="1.7"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="${tx}" fill="none" style="stroke:var(--up)" stroke-width="1.5"
+      stroke-linejoin="round" stroke-linecap="round" opacity=".92"/>
+  </svg>`;
+}
+
+function renderOv(d){
+  const m=d.meta||{};
+  $('kpis').innerHTML=`
+    <div class="kpi dual">
+      <div class="kv">
+        <div><div class="k">下行速率</div><div class="v dn">${bps(d.rx_rate)}</div>
+          <div class="s">累计 ${bsize(d.rx_total)}</div></div>
+        <div><div class="k">上行速率</div><div class="v up">${bps(d.tx_rate)}</div>
+          <div class="s">累计 ${bsize(d.tx_total)}</div></div>
+      </div>
+      <div class="spark" id="spkBoth"></div>
+    </div>
+    <div class="kpi">
+      <div class="kv">
+        <div><div class="k">活跃连接</div><div class="v">${m.conn_count||0}</div>
+          <div class="s">本机回环 ${m.loop_conns||0}</div></div>
+        <div><div class="k">容器</div><div class="v">${m.containers||0}</div>
+          <div class="s">${m.docker_ok?'Docker '+esc(m.docker_ver):'Docker 不可用'}</div></div>
+      </div>
+      <div class="kfacts">
+        <span>无主 socket <b class="${m.unknown?'warn':''}">${m.unknown||0}</b></span>
+        <span>veth 已映射 <b>${m.veth_mapped||0}</b></span>
+        <span>UDP 无计数 <b>${m.nobyte||0}</b></span>
+      </div>
+    </div>`;
+  drawSparkBoth($('spkBoth'));
+
+  // 网卡改一行一条：表格的 6 列在这里全是噪音，真正要看的是「哪条线在跑」。
+  const ifs=d.ifaces||[];
+  if(!ifs.length){
+    $('ifaceBox').innerHTML='<div class="empty">没有读到网卡</div>';
+  }else{
+    $('ifaceBox').innerHTML='<div class="iflist">'+ifs.map(i=>`
+      <div class="ifrow">
+        <span class="ifdot${i.up?'':' off'}"></span>
+        <span class="ifname mono">${esc(i.name)}</span>
+        ${i.virtual?'<span class="tag tag-q">虚拟</span>':''}
+        ${(i.speed&&i.speed!=='-1')?`<span class="ifspd">${esc(i.speed)} Mb/s</span>`:''}
+        <span class="ifacc">累计 ${bsize(i.rx)} ↓ / ${bsize(i.tx)} ↑</span>
+        <span class="ifrates">
+          <span style="color:var(--down)">↓ ${bps(i.rxr)}</span>
+          <span style="color:var(--up)">↑ ${bps(i.txr)}</span>
+        </span>
+      </div>`).join('')+'</div>';
+  }
+
+  renderTop(d);
+}
+
+/* ================= 连接 ================= */
+let SORT={key:'rate',dir:-1}, Q='';
+// 按应用分组：一个应用常挂十几条连接，平铺出来根本看不出「谁在跑」。
+// COPEN 记展开的分组；单条连接的分组默认就当展开，省一次点击。
+let CGRP=true, COPEN=new Set();
+
+// 一行的五个单元格，分组和平铺共用，免得两套渲染走样
+function connCells(c,appName){
+  const lp=c.scope==='loop'?'<span class="tag tag-q">本机</span>':'';
+  const app=c.svc||c.container;
+  let first;
+  if(appName){
+    // 分组模式：应用名已经在组头上，这里只留进程名和远端
+    first=`<span class="pname">${esc(c.proc||app)}</span>${lp}`
+      +`<div class="sub mono">${esc(c.remote)}</div>`;
+  }else{
+    first=`${iconOf(app,'inl')}<span class="pname">${esc(app)}</span>`
+      +`${c.proc&&c.proc!==app?` <span class="sub">${esc(c.proc)}</span>`:''}${lp}`
+      +`<div class="sub mono">${esc(c.remote)}</div>`;
+  }
+  let host='';
+  if(c.domain){
+    host=`<span class="dom">${esc(c.domain)}</span>`;
+    if(c.domain_n>0) host+=`<em>+${c.domain_n}</em>`;
+  }else if(c.host){
+    host=`<span class="sub">${esc(c.host)}</span>`;
+  }
+  if(c.cc){
+    // 徽标显示国家名而不是两位代码，中文界面上更好认。
+    // 省市直接显示出来，不再只塞进 title：手机上根本没有 hover，
+    // 而「连到哪个城市」正是排查 CDN / 加速线路时最想看的一列。
+    const tip=[c.cname,c.region,c.city].filter(Boolean).join(' · ')
+      +(c.asn_org?` · ${c.asn_org}${c.asn?' (AS'+c.asn+')':''}`:'');
+    const where=[c.cname||c.cc,c.city].filter(Boolean).join(' · ');
+    host+=` <span class="cc" title="${esc(tip)}">${esc(where)}</span>`;
+  }
+  host=(host||'<span class="sub">–</span>')
+    +`<div class="sub">${esc((c.proto||'').toUpperCase())} · ${esc(c.state)}</div>`;
+  return {first,host};
+}
+
+/* 连接表：结构不变时只刷数字，不重建 DOM。
+ *
+ * 整表每秒重建一次的话，行序会跟着速率跳动、点击可能落在被换掉的节点上、
+ * 鼠标悬停也会断——用户想点开一个组看详情，结果点完东西就跑走了。
+ * 现在只有「成员变了 / 展开状态变了 / 到了重排时间」才重建，
+ * 其余时候原地改几个文本节点，页面完全不闪。 */
+let CSIG='', CSIG_AT=0, CBUSY_AT=0;
+const rowKey=c=>c.local+'|'+c.remote+'|'+c.proto;
+const isOpen=g=>COPEN.has(g.key)||g.items.length===1;
+
+function connBusy(){
+  if(Date.now()-CBUSY_AT<2500) return true;      // 刚点过，别在这时候重排
+  const box=$('connBox');
+  if(box&&box.matches(':hover')) return true;    // 鼠标还在表上，说明在看
+  const sel=window.getSelection();
+  return !!(sel&&String(sel).length);            // 正在选文字
+}
+
+function patchConns(list,groups){
+  const box=$('connBox');
+  const setCell=(tr,t,html)=>{
+    const el=tr.querySelector('[data-t="'+t+'"]');
+    if(el&&el.__v!==html){ el.innerHTML=html; el.__v=html; }
+  };
+  const byKey=new Map();
+  for(const c of list) byKey.set(rowKey(c),c);
+  box.querySelectorAll('tr[data-rk]').forEach(tr=>{
+    const c=byKey.get(tr.dataset.rk);
+    if(!c) return;
+    setCell(tr,'txr',`<span style="color:var(--up)">${bps(c.txr)}</span>`);
+    setCell(tr,'rxr',`<span style="color:var(--down)">${bps(c.rxr)}</span>`);
+    setCell(tr,'tot',`${bsize(c.rx)} / ${bsize(c.tx)}`);
+    setCell(tr,'age',`<span class="sub">${dur(c.age)}</span>`);
+  });
+  if(groups){
+    const gm=new Map(groups.map(g=>[g.key,g]));
+    box.querySelectorAll('tr.grprow[data-g]').forEach(tr=>{
+      const g=gm.get(tr.dataset.g);
+      if(!g) return;
+      setCell(tr,'gr',`<span style="color:var(--down)">↓ ${bps(g.rxr)}</span>
+        <span style="color:var(--up)">↑ ${bps(g.txr)}</span>`);
+    });
+  }
+}
+
+function renderConns(d){
+  let list=(d.conns||[]).slice();
+  if(Q){
+    const q=Q.toLowerCase();
+    list=list.filter(c=>[c.proc,c.svc,c.container,c.remote,c.host,c.domain,c.exe,c.asn_org,c.cname]
+      .join(' ').toLowerCase().includes(q));
+  }
+  let hidden=0;
+  if($('hideidle').checked){
+    const busy=list.filter(c=>c.txr+c.rxr>0);
+    hidden=list.length-busy.length;
+    if(busy.length>0) list=busy;
+  }
+  // 本机回环默认折叠：它不经过网卡，混在连接列表里会让人误以为是外网活动。
+  let hiddenLoop=0;
+  if($('hideloop').checked){
+    const ext=list.filter(c=>c.scope!=='loop');
+    hiddenLoop=list.length-ext.length;
+    list=ext;
+  }
+  const notes=[];
+  if(hidden>0) notes.push(`已隐藏 ${hidden} 条空闲`);
+  if(hiddenLoop>0) notes.push(`已隐藏 ${hiddenLoop} 条本机回环`);
+  $('conncount').textContent=`${list.length} 条`+(notes.length?`（${notes.join('、')}）`:'');
+  if(!list.length){
+    CSIG='';
+    $('connBox').innerHTML='<div class="empty">暂无连接</div>';
+    return;
+  }
+
+  const k=SORT.key, dir=SORT.dir;
+  const cmp=(a,b)=>{
+    const va=k==='rate'?(a.txr+a.rxr):(a[k]||0), vb=k==='rate'?(b.txr+b.rxr):(b[k]||0);
+    if(typeof va==='string') return dir*String(va).localeCompare(String(vb));
+    return dir*(va-vb);
+  };
+  list.sort(cmp);
+
+  let groups=null;
+  if(CGRP){
+    const gs=new Map();
+    for(const c of list){
+      const key=c.svc||c.container||c.proc||'未知';
+      let g=gs.get(key);
+      if(!g){ g={key,items:[],txr:0,rxr:0,loop:0,isCont:!c.svc&&!!c.container}; gs.set(key,g); }
+      g.items.push(c); g.txr+=c.txr; g.rxr+=c.rxr;
+      if(c.scope==='loop') g.loop++;
+    }
+    groups=[...gs.values()].sort((a,b)=>(b.txr+b.rxr)-(a.txr+a.rxr));
+  }
+
+  // 结构指纹：只含成员，不含数值，也不含展开状态。
+  // 数值变化不该触发重建（那正是每秒跳动的来源）；展开/折叠只切 class，
+  // 本来就不用重建——把它算进指纹反而会让「点一下」连带重排一次。
+  const sig=CGRP
+    ?'g:'+groups.map(g=>g.key+'/'+g.items.length+'/'
+        +g.items.map(rowKey).sort().join('+')).join('|')
+    :'f:'+list.map(rowKey).sort().join('|');
+  const due=Date.now()-CSIG_AT>=4000&&!connBusy();
+  if(sig===CSIG&&!due){ patchConns(list,groups); return; }
+  CSIG=sig; CSIG_AT=Date.now();
+
+  // 列序统一「下行在前、上行在后」，和顶栏（↓ 速率 / ↑ 速率）、KPI、排行、网卡一致。
+  // 原来这里是 ↑ 在前，而组头是 ↓ 在前，展开分组时上下两行数字顺序相反，很难对上。
+  const ar=key=>SORT.key===key?(SORT.dir<0?' ↓':' ↑'):'';
+  const head=`<thead><tr>
+    <th class="growcol">应用 / 进程</th><th>域名 / 协议</th>
+    <th class="s" data-k="rxr">↓${ar('rxr')}</th><th class="s" data-k="txr">↑${ar('txr')}</th>
+    <th class="s" data-k="tx">累计 ↓/↑${ar('tx')}</th>
+    <th class="s" data-k="age">时长${ar('age')}</th></tr></thead>`;
+
+  let body='';
+  if(!CGRP){
+    body=list.map(c=>{
+      const {first,host}=connCells(c,false);
+      return `<tr data-rk="${esc(rowKey(c))}">
+        <td class="growcol m-head" data-l="应用 / 进程">${first}</td>
+        <td data-l="域名 / 协议">${host}</td>
+        <td class="r" data-l="↓" data-t="rxr"><span style="color:var(--down)">${bps(c.rxr)}</span></td>
+        <td class="r" data-l="↑" data-t="txr"><span style="color:var(--up)">${bps(c.txr)}</span></td>
+        <td class="r" data-l="累计" data-t="tot">${bsize(c.rx)} / ${bsize(c.tx)}</td>
+        <td class="r" data-l="时长" data-t="age"><span class="sub">${dur(c.age)}</span></td>
+      </tr>`;
+    }).join('');
+  }else{
+    body=groups.map(g=>{
+      const open=isOpen(g);
+      const tg=g.isCont?'<span class="tag">容器</span>':'';
+      const lp=g.loop===g.items.length?'<span class="tag tag-q">本机</span>'
+        :(g.loop?`<span class="tag tag-q">含 ${g.loop} 条本机</span>`:'');
+      const hd=`<tr class="grprow" data-g="${esc(g.key)}">
+        <td colspan="6" class="m-head"><div class="grpcell">
+          <span class="chev${open?' on':''}"></span>
+          ${iconOf(g.key,'inl')}
+          <span class="pname">${esc(g.key)}</span>${tg}${lp}
+          <span class="cnt">${g.items.length} 条</span>
+          <span class="grate" data-t="gr">
+            <span style="color:var(--down)">↓ ${bps(g.rxr)}</span>
+            <span style="color:var(--up)">↑ ${bps(g.txr)}</span>
+          </span>
+        </div></td></tr>`;
+      const kids=g.items.map(c=>{
+        const {first,host}=connCells(c,true);
+        return `<tr class="child${open?'':' hide'}" data-rk="${esc(rowKey(c))}">
+          <td class="growcol m-head" data-l="进程">${first}</td>
+          <td data-l="域名 / 协议">${host}</td>
+          <td class="r" data-l="↓" data-t="rxr"><span style="color:var(--down)">${bps(c.rxr)}</span></td>
+          <td class="r" data-l="↑" data-t="txr"><span style="color:var(--up)">${bps(c.txr)}</span></td>
+          <td class="r" data-l="累计" data-t="tot">${bsize(c.rx)} / ${bsize(c.tx)}</td>
+          <td class="r" data-l="时长" data-t="age"><span class="sub">${dur(c.age)}</span></td>
+        </tr>`;
+      }).join('');
+      return hd+kids;
+    }).join('');
+  }
+  $('connBox').innerHTML=`<table class="tbl">${head}<tbody>${body}</tbody></table>`;
+}
+
+/* ================= 进程 / 容器排行 ================= */
+function renderRank(box,list,label){
+  const max=Math.max(1,...list.map(p=>p.txr+p.rxr));
+  const rows=list.slice(0,100).map(p=>{
+    const w=Math.round((p.txr+p.rxr)/max*100);
+    const sub=p.src==='veth'
+      ? `<div class="sub mono">${p.veth?esc(p.veth):'<span style="color:var(--bad)">未映射 veth</span>'}</div>`:'';
+    return {
+      name:p.name, cont:p.container, conns:p.conns, txr:p.txr, rxr:p.rxr, tx:p.tx, rx:p.rx, w:w, sub:sub
+    };
+  });
+  renderTable(box,[
+    {k:'name',label:label,head:true,cell:p=>`<span class="pname">${esc(p.name)}</span>`
+      +(p.cont&&p.cont!==p.name?`<span class="tag">${esc(p.cont)}</span>`:'')+p.sub},
+    {k:'conns',label:'连接',cls:'r',cell:p=>`<span class="sub">${p.conns<0?'—':p.conns}</span>`},
+    // 列序和顶栏 / KPI / 连接表一致：下行在前。概览的「谁在跑流量」也是 ↓ 在前，
+    // 三个视图看同一个数字，顺序不该反过来。
+    {k:'rxr',label:'↓',cls:'r',cell:p=>`<span style="color:var(--down)">${bps(p.rxr)}</span>`},
+    {k:'txr',label:'↑',cls:'r',cell:p=>`<span style="color:var(--up)">${bps(p.txr)}</span>`},
+    {k:'acc',label:'累计 ↓/↑',cls:'r',cell:p=>`<span class="sub">${bsize(p.rx)} / ${bsize(p.tx)}</span>`},
+    {k:'bar',label:'占比',w:110,hideM:true,cell:p=>`<div class="bar" style="width:${p.w}%"></div>`},
+  ],rows,'暂无数据');
+}
+
+/* ================= 排行（服务 / 进程） =================
+   这个视图回答的是「谁在偷跑流量」，所以默认按服务聚合。
+   一个应用常常挂着十几个进程（node / python3 / ffmpeg），按进程名看只会是一屏噪音；
+   服务归属由后端算（systemd 单元名，或 /var/apps/<pkg>/manifest 里的 display_name），
+   前端只管分组、排序和展开。 */
+let RBY='svc', RWIN='live', RQ='', ROPEN=new Set(), RSORT={key:'tot',dir:-1};
+let RHIST=null, RHISTBUSY=false;
+
+const IC=['#4b8fe0','#e8734a','#3fae86','#c9a227','#8b6fd4','#d95f8f','#2fa3b5','#c9702e'];
+const UNATTR='未归因';
+const baseName=p=>String(p||'').split('/').pop();
+function iconOf(name, extra){
+  if(name===UNATTR) return `<span class="appic q${extra?' '+extra:''}">?</span>`;
+  let h=0;
+  for(let i=0;i<name.length;i++) h=(h*31+name.charCodeAt(i))>>>0;
+  const ch=Array.from(name)[0]||'?';
+  return `<span class="appic${extra?' '+extra:''}" style="background:${IC[h%IC.length]}">${esc(ch.toUpperCase())}</span>`;
+}
+
+// 服务分组：宿主进程按 svc 归并，容器整体也作为一行——
+// 不然 Docker 里偷跑的流量在这个视图里会凭空消失。
+// 「系统 / 无主 socket」「已关闭连接」不是应用，统一折进「未归因」一行；
+// 网卡总量和已归因量的差额也挂在同一行，这样占比加起来正好是 100%。
+function groupServices(d){
+  const g=new Map();
+  let un=null;
+  const get=(name,kind)=>{
+    let it=g.get(name);
+    if(!it){ it={key:name,name,kind,txr:0,rxr:0,tx:0,rx:0,conns:0,kids:[]}; g.set(name,it); }
+    return it;
+  };
+  const unattr=()=>{
+    if(!un) un={key:UNATTR,name:UNATTR,kind:'other',txr:0,rxr:0,tx:0,rx:0,conns:0,kids:[]};
+    return un;
+  };
+  for(const p of (d&&d.procs)||[]){
+    if(p.pseudo){
+      const it=unattr();
+      it.conns+=p.conns||0; it.tx+=p.tx; it.rx+=p.rx;
+      it.kids.push({name:p.name,exe:'',txr:p.txr,rxr:p.rxr,tx:p.tx,rx:p.rx,conns:p.conns});
+      continue;
+    }
+    const it=get(p.svc||p.name,'svc');
+    it.txr+=p.txr; it.rxr+=p.rxr; it.tx+=p.tx; it.rx+=p.rx;
+    if(p.conns>0) it.conns+=p.conns;
+    it.kids.push({name:p.name,exe:p.exe,txr:p.txr,rxr:p.rxr,tx:p.tx,rx:p.rx,conns:p.conns});
+  }
+  for(const c of (d&&d.conts)||[]){
+    const it=get(c.name,'cont');
+    it.txr+=c.txr; it.rxr+=c.rxr; it.tx+=c.tx; it.rx+=c.rx;
+    it.veth=c.veth||it.veth;
+  }
+  // 网卡上真实跑了、但没有落到任何 socket 上的那部分（UDP 没有字节计数、
+  // 容器 netns、内核态转发）。不说出来，用户会以为排行里的数字就是全部。
+  const ut=(d&&d.unattr_tx)||0, ur=(d&&d.unattr_rx)||0;
+  if(ut+ur>0){ const it=unattr(); it.txr+=ut; it.rxr+=ur; }
+  const out=[];
+  for(const it of g.values()){
+    if(it.kind==='cont'){
+      it.sub=`<div class="sub mono">容器${it.veth?' · '+esc(it.veth):''}</div>`;
+    }else if(it.kids.length>1){
+      it.sub=`<div class="sub">${it.kids.length} 个进程${it.conns?` · ${it.conns} 条连接`:''}</div>`;
+    }else if(it.kids.length===1){
+      const exe=it.kids[0].exe||'', b=baseName(exe);
+      // 可执行文件名和服务名一样时没必要重复一行，只会让表格变高
+      it.sub=(b&&b.toLowerCase()!==String(it.name).toLowerCase())
+        ?`<div class="sub mono" title="${esc(exe)}">${esc(b)}</div>`:'';
+    }
+    out.push(it);
+  }
+  if(un){
+    const nb=(d&&d.meta&&d.meta.nobyte)||0;
+    const up=(d&&d.unattr_parts)||{};
+    // 有 nft 计数器就把差额拆开：UDP 和内核转发能直接量出来，
+    // 剩下的才归到「无主 socket / 采样间隙」。没有计数器时只报总数。
+    let detail='';
+    if(up.available){
+      const parts=[];
+      if(up.udp>0) parts.push(`UDP ${bps(up.udp)}`);
+      if(up.fwd>0) parts.push(`内核转发 ${bps(up.fwd)}`);
+      const rest=Math.max(0,(un.txr+un.rxr)-(up.udp+up.fwd));
+      if(rest>1024) parts.push(`其余 ${bps(rest)}`);
+      if(parts.length) detail=' · '+parts.join(' · ');
+    }
+    un.sub='<div class="sub">找不到主人的流量'+(detail||(nb>0?` · ${nb} 条 UDP 没有字节计数`:''))+'</div>';
+    out.push(un);
+  }
+  return out;
+}
+
+function flatProcs(d){
+  const out=[];
+  let un=null;
+  for(const p of (d&&d.procs)||[]){
+    if(p.pseudo){
+      if(!un) un={key:UNATTR,name:UNATTR,kind:'other',txr:0,rxr:0,tx:0,rx:0,conns:-1,kids:null,
+        sub:'<div class="sub">找不到主人的流量</div>'};
+      un.txr+=p.txr; un.rxr+=p.rxr; un.tx+=p.tx; un.rx+=p.rx;
+      continue;
+    }
+    out.push({key:p.key||p.name,name:p.name,kind:'proc',kids:null,
+      txr:p.txr,rxr:p.rxr,tx:p.tx,rx:p.rx,conns:p.conns,
+      sub:p.exe?`<div class="sub mono" title="${esc(p.exe)}">${esc(p.exe)}</div>`:''});
+  }
+  for(const c of (d&&d.conts)||[]){
+    out.push({key:'cont:'+c.name,name:c.name,kind:'cont',kids:null,
+      txr:c.txr,rxr:c.rxr,tx:c.tx,rx:c.rx,conns:-1,
+      sub:`<div class="sub mono">容器${c.veth?' · '+esc(c.veth):''}</div>`});
+  }
+  const ut=(d&&d.unattr_tx)||0, ur=(d&&d.unattr_rx)||0;
+  if(ut+ur>0){
+    if(!un) un={key:UNATTR,name:UNATTR,kind:'other',txr:0,rxr:0,tx:0,rx:0,conns:-1,kids:null,
+      sub:'<div class="sub">找不到主人的流量</div>'};
+    un.txr+=ut; un.rxr+=ur;
+  }
+  if(un) out.push(un);
+  return out;
+}
+
+const rLive=()=>RWIN==='live';
+
+function rFilter(items){
+  if(!RQ) return items;
+  const q=RQ.toLowerCase();
+  return items.filter(it=>
+    String(it.name).toLowerCase().includes(q)
+    || String(it.sub||'').toLowerCase().includes(q)
+    || (it.kids||[]).some(k=>String(k.name).toLowerCase().includes(q)
+        || String(k.exe||'').toLowerCase().includes(q)));
+}
+
+function rVal(it,k){
+  if(k==='name') return it.name;
+  if(k==='tx') return rLive()?it.txr:it.tx;
+  if(k==='rx') return rLive()?it.rxr:it.rx;
+  return rLive()?it.txr+it.rxr:it.tx+it.rx;
+}
+
+function rSort(items){
+  const k=RSORT.key, dir=RSORT.dir;
+  items.sort((a,b)=>{
+    const va=rVal(a,k), vb=rVal(b,k);
+    if(typeof va==='string') return dir*String(va).localeCompare(String(vb));
+    const za=va<=0, zb=vb<=0;
+    if(za!==zb) return za?1:-1;   // 没流量的沉底，别把有用的行挤到下面
+    if(va!==vb) return dir*(va-vb);
+    return String(a.name).localeCompare(String(b.name));
+  });
+  return items;
+}
+
+function rCell(rate,bytes,cls){
+  if(rLive()){
+    return rate>0?`<span style="color:var(--${cls})">${bps(rate)}</span>`:'<span class="sub">—</span>';
+  }
+  return bytes>0?`<span style="color:var(--${cls})">${bsize(bytes)}</span>`:'<span class="sub">—</span>';
+}
+
+function paintRank(items){
+  const list=rSort(rFilter(items));
+  const total=list.reduce((s,it)=>s+rVal(it,'tot'),0)||1;
+
+  const rows=[];
+  for(const it of list){
+    const tot=rVal(it,'tot');
+    rows.push(Object.assign({},it,{__tot:tot,__pct:tot/total*100,
+      __cls:(tot<=0?'zero ':'')}));
+    if(ROPEN.has(it.key)&&it.kids&&it.kids.length>1){
+      for(const k of it.kids){
+        const kt=rLive()?k.txr+k.rxr:k.tx+k.rx;
+        rows.push({__kid:true,key:it.key+'|'+k.name,name:k.name,exe:k.exe,
+          txr:k.txr,rxr:k.rxr,tx:k.tx,rx:k.rx,conns:k.conns,
+          __tot:kt,__pct:kt/total*100,__cls:'kidrow '+(kt<=0?'zero ':'')});
+      }
+    }
+  }
+
+  renderTable($('rankBox'),[
+    {k:'name',label:RBY==='svc'?'服务':'进程',head:true,sortable:true,cell:it=>{
+      if(it.__kid){
+        const b=baseName(it.exe);
+        const sub=(b&&b.toLowerCase()!==String(it.name).toLowerCase())
+          ?`<span class="sub mono" title="${esc(it.exe)}">${esc(b)}</span>`:'';
+        return `<div class="nmwrap"><span class="chev ghost"></span>`
+          +`<span class="nmtext"><span class="pname">${esc(it.name)}</span>${sub}</span></div>`;
+      }
+      const canExp=it.kids&&it.kids.length>1;
+      const chev=`<span class="chev${ROPEN.has(it.key)?' on':''}"></span>`;
+      const tag=it.kind==='cont'?'<span class="tag">容器</span>':'';
+      // 整块名字都可以点，只让用户去点那个 11px 的小三角太难发现
+      return `<div class="nmwrap${canExp?' xp':''}"${canExp?` data-rk="${esc(it.key)}"`:''}>`
+        +`${canExp?chev:'<span class="chev ghost"></span>'}${iconOf(it.name)}<span class="nmtext">`
+        +`<span class="pname">${esc(it.name)}${tag}</span>${it.sub||''}</span></div>`;
+    }},
+    // 列序跟连接页、历史页统一：↓ 在前。之前这里是「发送(tx) → 接收」，
+    // 三张表里只有这一张是 ↑ 在前，来回切页要重新找列。
+    {k:'rx',label:'接收',cls:'r',sortable:true,w:98,cell:it=>rCell(it.rxr,it.rx,'down')},
+    {k:'tx',label:'发送',cls:'r',sortable:true,w:98,cell:it=>rCell(it.txr,it.tx,'up')},
+    {k:'tot',label:'合计',cls:'r',sortable:true,w:98,cell:it=>{
+      if(it.__tot<=0) return '<span class="sub">—</span>';
+      return rLive()?bps(it.txr+it.rxr):bsize(it.tx+it.rx);
+    }},
+    {k:'bar',label:'占比',w:158,cell:it=>{
+      if(it.__kid) return '';
+      const p=it.__pct;
+      return `<div style="display:flex;align-items:center">`
+        +`<div class="track" style="flex:1"><i style="width:${p>0?Math.max(2,Math.round(p)):0}%"></i></div>`
+        +`<span class="pct">${p>=0.05?p.toFixed(1):'0'}%</span></div>`;
+    }},
+  ],rows,'没有匹配的条目',RSORT);
+}
+
+function renderRankLive(d){
+  if(!d) return;
+  const items=RBY==='svc'?groupServices(d):flatProcs(d);
+  $('rhint').textContent=`${items.length} 项`;
+  $('rnote').textContent=(RBY==='svc'
+    ?'服务归属取自 systemd 单元名和应用目录（/var/apps/<应用>/manifest 的 display_name）；容器整体单列一行。点箭头可以展开看具体进程。'
+    :'同一个进程名在不同服务下会分开统计；容器流量来自宿主机 veth 统计，拿不到连接数。')
+    +' 本机回环（127.0.0.1 / ::1）不经过网卡，不计入这里；'
+    +'「未归因」是网卡总量减去已归因之后的差额——UDP 没有字节计数、容器在独立 netns、以及无主 socket 都会落进这一栏。';
+  paintRank(items);
+}
+
+function renderRankHist(){
+  const rows=(RHIST&&RHIST.rows)||[];
+  const items=rows.map(r=>({
+    key:r.name,name:r.name,kind:RBY==='svc'?'svc':'proc',
+    txr:0,rxr:0,tx:r.tx,rx:r.rx,conns:-1,kids:null,
+    sub:(RBY==='svc'&&r.procs>1)?`<div class="sub">${r.procs} 个进程</div>`:''
+  }));
+  $('rhint').textContent=`${items.length} 项`;
+  paintRank(items);
+}
+
+async function fetchRank(){
+  if(RHISTBUSY) return;
+  RHISTBUSY=true;
+  try{
+    RHIST=await getJSON(`rank?range=${encodeURIComponent(RWIN)}&by=${encodeURIComponent(RBY)}`);
+    $('rnote').textContent='区间累计从历史库按进程维度汇总，再按当前的服务归属归并。'
+      +'已经退出、当前不在运行的进程会按它自己的名字单独列出。';
+    renderRankHist();
+  }catch(e){
+    RHIST=null;
+    $('rankBox').innerHTML=`<div class="empty">区间排行加载失败：${esc(e.message)}</div>`;
+    $('rnote').textContent='';
+    $('rhint').textContent='';
+  }finally{ RHISTBUSY=false; }
+}
+
+// 概览页的「谁在跑流量」：同一份分组，取前 6 个有流量的
+function renderTop(d){
+  const items=groupServices(d);
+  const live=items.filter(i=>i.txr+i.rxr>0).sort((a,b)=>(b.txr+b.rxr)-(a.txr+a.rxr));
+  // 回环流量不进排行，但也不能装作不存在——用户看到网卡很闲、排行也空的时候，
+  // 需要知道「本机在自说自话」这件事。
+  const loop=(d&&((d.loop_tx||0)+(d.loop_rx||0)))||0;
+  const foot=loop>0
+    ?`<div class="sub topfoot">另有本机回环 ${bps(loop)} · ${((d.meta||{}).loop_conns)||0} 条 —— 本机进程之间的 IPC，不经过网卡，不计入上方和网卡总量。</div>`
+    :'';
+  if(!live.length){
+    $('topBox').innerHTML='<div class="empty">网卡上没有可归因到进程的流量</div>'+foot;
+    $('topHint').textContent='实时 · 按服务';
+    return;
+  }
+  const max=live[0].txr+live[0].rxr;
+  $('topHint').textContent=`实时 · 按服务 · ${live.length} 项有流量`;
+  $('topBox').innerHTML='<div class="toplist">'+live.slice(0,6).map(it=>{
+    const r=it.txr+it.rxr, p=Math.max(3,Math.round(r/max*100));
+    const tag=it.kind==='cont'?'<span class="tag">容器</span>':'';
+    const cls=it.kind==='other'?' toprow-q':'';
+    const href=it.kind==='other'?'#conn':'#rank';
+    return `<a class="toprow${cls}" href="${href}">${iconOf(it.name)}`
+      +`<div class="topmain"><span class="pname">${esc(it.name)}${tag}</span>${it.sub||''}</div>`
+      +`<span class="toprates"><span style="color:var(--down)">↓ ${bps(it.rxr)}</span>`
+      +`<span style="color:var(--up)">↑ ${bps(it.txr)}</span></span>`
+      +`<span class="topbar"><i style="width:${p}%"></i></span></a>`;
+  }).join('')+'</div>'+foot;
+}
+
+/* ================= 历史 ================= */
+// HDIM 默认「应用」而不是「进程」：用户是按「飞牛影视」「qbittorrent」定位的，
+// 进程名（pxy / node / next-server）看不出是哪个 app。进程维度仍然保留。
+let HIST=null, HRANGE='24h', HDIM='svc', HDIR='total', HOVER=-1, HSEL={}, HBUSY=false, HLOG=false;
+/* 历史页色板。
+   原来是 10 个彩虹色循环，第 3 位 #3fae86、第 7 位 #2fa3b5、第 10 位 #7fa83c
+   全挤在青绿一段，堆叠面积图上三条都长一个样（百度网盘 / OpenList /
+   NodeBabyLink 在图例里根本分不出来）。
+   试过「前 3 名彩色、其余全灰」，更糟：第 4 到第 8 名是相邻的五段灰，
+   在堆叠图里直接糊成一整块，比原来还分不清。
+   所以改成三档，按排名固定：
+     1–3 名  高饱和强调色（蓝 / 橙 / 紫），颜色本身就是「谁是大头」的提示；
+     4–6 名  换色相但降一点饱和（青绿 / 金 / 玫红），仍能和前三条分开；
+     7 名以后 才转中性灰——这一档通常只占 1–2%，在图上本来就是细边，
+             用灰色退到背景里正合适，也顺便让前几名更突出。
+   相邻两条的色相都差 40° 以上，且全表只有一个绿（第 4 位），不会再撞色。 */
+const PAL_LIGHT=['#2f6fd0','#e0703a','#7c56c9','#0f8f7a','#c9a227','#cf6a9e','#7c8797','#b6bec9'];
+const PAL_DARK =['#5b95e6','#ee8a5c','#a183e0','#2fae94','#e0bb45','#e089b4','#8d97a5','#5f6875'];
+function isDark(){
+  const t=document.documentElement.getAttribute('data-theme');
+  if(t==='dark') return true;
+  if(t==='light') return false;
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+const GEO={n:0};
+const hcache=document.createElement('canvas');
+
+const hName=k=>HDIM==='total'?'全部流量':k;
+function hVal(s,i){
+  if(HDIR==='tx') return s.tx[i]||0;
+  if(HDIR==='rx') return s.rx[i]||0;
+  return (s.tx[i]||0)+(s.rx[i]||0);
+}
+function colorFor(key){
+  const arr=(HIST&&HIST.series)||[];
+  const i=arr.findIndex(s=>s.key===key);
+  const pal=isDark()?PAL_DARK:PAL_LIGHT;
+  return pal[(i<0?0:i)%pal.length];
+}
+// Y 轴刻度按「显示单位」取整，否则 50000 字节的步长在 KB 下会变成 48.8/97.7 这种数字
+function niceAxis(peak){
+  const u=['B','KB','MB','GB','TB'];
+  let i=0, x=Math.max(1,peak);
+  while(x>=1024 && i<u.length-1){ x/=1024; i++; }
+  const target=x/4;
+  const p=Math.pow(10,Math.floor(Math.log10(target||1)));
+  const m=target/p;
+  const step=(m<=1?1:m<=2?2:m<=2.5?2.5:m<=5?5:10)*p;
+  return {unit:i, step:step, mul:Math.pow(1024,i), max:step*4};
+}
+function axLabel(v,unit){
+  const u=['B','KB','MB','GB','TB'][unit];
+  const s=v<10?Math.round(v*10)/10:Math.round(v);
+  return s+' '+u;
+}
+
+// 对数刻度的网格线：按数量级取，最多 7 条
+function logGrid(ymax){
+  const t=[];
+  for(let e=0;e<13;e++){
+    const v=Math.pow(10,e);
+    if(v>ymax) break;
+    t.push(v);
+  }
+  let out=t;
+  while(out.length>7){
+    out=out.filter((_,i)=>i%2===0);
+    if(out.length&&t.length&&out[out.length-1]!==t[t.length-1]) out.push(t[t.length-1]);
+  }
+  return out;
+}
+
+// 对数刻度的标签按十进制写。用 bsize() 会把 10^6 显示成「976.6 KB」——
+// 刻度线本来是整数量级，标签却是 1024 进制换算的零头，看着像出错。
+function decLabel(v){
+  const u=['','K','M','G','T'];
+  let i=0, x=v;
+  while(x>=1000&&i<u.length-1){ x/=1000; i++; }
+  const s=x<10?Math.round(x*10)/10:Math.round(x);
+  return s+u[i];
+}
+
+function buildCache(){
+  const wrap=$('hchart').parentElement, cv=$('hchart');
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const W=wrap.clientWidth||600, H=wrap.clientHeight||300;
+  hcache.width=Math.round(W*dpr); hcache.height=Math.round(H*dpr);
+  cv.width=hcache.width; cv.height=hcache.height;
+  cv.style.width=W+'px'; cv.style.height=H+'px';
+  GEO.W=W; GEO.H=H;
+
+  const g=hcache.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H);
+  const cs=getComputedStyle(document.documentElement);
+  const cLine=cs.getPropertyValue('--line').trim()||'#e6e9ee';
+  const cFaint=cs.getPropertyValue('--faint').trim()||'#949ca7';
+
+  const B=(HIST&&HIST.buckets)||[];
+  const S=((HIST&&HIST.series)||[]).filter(s=>!HSEL[s.key]);
+  const n=B.length;
+  if(!n||!S.length){
+    g.fillStyle=cFaint; g.font='13px system-ui,sans-serif';
+    g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(n?'所有序列都被隐藏了':'暂无历史数据，采集满 1 分钟后开始记录', W/2, H/2);
+    GEO.n=0;
+    return;
+  }
+
+  const padL=W<420?46:58, padR=12, padT=14, padB=24;
+  const pw=Math.max(1,W-padL-padR), ph=Math.max(1,H-padT-padB);
+  const sums=new Float64Array(n);
+  for(const s of S) for(let i=0;i<n;i++) sums[i]+=hVal(s,i);
+  let peak=0;
+  for(let i=0;i<n;i++) if(sums[i]>peak) peak=sums[i];
+  const ax=niceAxis(peak);
+  // 一根 100MB 的突发柱会把 24 小时里其余的部分压成一条贴着零线的直线，
+  // 所以给一个对数刻度：平时是多少、突发有多高，能同时看见。
+  const ymax=Math.max(1, HLOG?peak:ax.max*ax.mul);
+
+  const X=i=>padL+(n<=1?pw/2:pw*i/(n-1));
+  const Y=HLOG
+    ? v=>padT+ph-ph*Math.log10(1+Math.max(0,v))/Math.log10(1+ymax)
+    : v=>padT+ph-ph*v/ymax;
+
+  g.strokeStyle=cLine; g.lineWidth=1;
+  g.font='11px ui-monospace,SFMono-Regular,Menlo,monospace';
+  g.fillStyle=cFaint; g.textAlign='right'; g.textBaseline='middle';
+  if(HLOG){
+    for(const v of logGrid(ymax)){
+      const yy=Math.round(Y(v))+0.5;
+      g.beginPath(); g.moveTo(padL,yy); g.lineTo(padL+pw,yy); g.stroke();
+      g.fillText(decLabel(v), padL-7, yy);
+    }
+  }else{
+    for(let k=0;k<=4;k++){
+      const yy=Math.round(Y(ymax*k/4))+0.5;
+      g.beginPath(); g.moveTo(padL,yy); g.lineTo(padL+pw,yy); g.stroke();
+      g.fillText(axLabel(ax.step*k, ax.unit), padL-7, yy);
+    }
+  }
+
+  // 从下往上堆叠
+  if(HLOG){
+    // 对数刻度下不堆叠：填充区从 Y(0) 一直铺到 Y(值)，在对数坐标里
+    // 几乎占满整个画布，反而看不清「平时是多少、突发有多高」。
+    // 改成每条序列各画一条线，量级差异一眼可见。
+    g.lineJoin='round'; g.lineCap='round';
+    for(const s of S){
+      g.beginPath();
+      for(let i=0;i<n;i++){
+        const yy=Y(hVal(s,i));
+        if(i) g.lineTo(X(i),yy); else g.moveTo(X(i),yy);
+      }
+      g.strokeStyle=colorFor(s.key); g.lineWidth=1.6; g.stroke();
+    }
+  }else{
+    const acc=new Float64Array(n);
+    for(const s of S){
+      const bot=new Float64Array(n), top=new Float64Array(n);
+      for(let i=0;i<n;i++){ bot[i]=acc[i]; acc[i]+=hVal(s,i); top[i]=acc[i]; }
+      g.beginPath();
+      g.moveTo(X(0),Y(top[0]));
+      for(let i=1;i<n;i++) g.lineTo(X(i),Y(top[i]));
+      for(let i=n-1;i>=0;i--) g.lineTo(X(i),Y(bot[i]));
+      g.closePath();
+      g.fillStyle=colorFor(s.key)+'d9';
+      g.fill();
+    }
+  }
+
+  const tfmt = HIST.gran==='1m'
+    ? t=>{const d=new Date(t*1000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+    : t=>{const d=new Date(t*1000);return (d.getMonth()+1)+'/'+d.getDate();};
+  g.fillStyle=cFaint; g.textBaseline='top';
+  const ticks=W<420?3:Math.min(6,n);
+  for(let k=0;k<ticks;k++){
+    const i=Math.round(k*(n-1)/((ticks-1)||1));
+    g.textAlign = k===0?'left' : (k===ticks-1?'right':'center');
+    g.fillText(tfmt(B[i]), X(i), padT+ph+7);
+  }
+
+  GEO.padL=padL; GEO.padT=padT; GEO.pw=pw; GEO.ph=ph;
+  GEO.n=n; GEO.X=X; GEO.Y=Y; GEO.B=B; GEO.S=S; GEO.log=HLOG;
+}
+
+function paint(hi){
+  const cv=$('hchart');
+  if(!GEO.W) return;
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const g=cv.getContext('2d');
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,GEO.W,GEO.H);
+  g.drawImage(hcache,0,0,GEO.W,GEO.H);
+  if(hi==null||hi<0||!GEO.n) return;
+
+  const cs=getComputedStyle(document.documentElement);
+  const cCard=cs.getPropertyValue('--card').trim()||'#fff';
+  const cText=cs.getPropertyValue('--text').trim()||'#151a20';
+  const xx=Math.round(GEO.X(hi))+0.5;
+  g.save();
+  // 十字线用正文色，压在彩色色带上才看得见
+  g.globalAlpha=.45; g.strokeStyle=cText; g.lineWidth=1;
+  g.setLineDash([3,3]);
+  g.beginPath(); g.moveTo(xx,GEO.padT); g.lineTo(xx,GEO.padT+GEO.ph); g.stroke();
+  g.setLineDash([]);
+  g.globalAlpha=1;
+  // 堆叠边界点：内芯填卡片底色 + 描边序列色，否则和它自己的色带糊在一起
+  let a=0;
+  for(const s of GEO.S){
+    // 对数模式画的是各自的线，不是堆叠，锚点也要跟着改
+    a = GEO.log ? hVal(s,hi) : a+hVal(s,hi);
+    const yy=GEO.Y(a);
+    g.beginPath(); g.arc(xx,yy,2.8,0,Math.PI*2);
+    g.fillStyle=cCard; g.fill();
+    g.strokeStyle=colorFor(s.key); g.lineWidth=1.6; g.stroke();
+  }
+  g.restore();
+}
+
+const drawHist=()=>{ buildCache(); paint(-1); };
+
+function showTip(i){
+  const tip=$('htip'), wrap=$('hchart').parentElement;
+  if(!GEO.n){ tip.style.display='none'; return; }
+  const d=new Date(GEO.B[i]*1000), p=n=>String(n).padStart(2,'0');
+  const when=`${d.getMonth()+1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const rows=[];
+  for(const s of GEO.S){
+    const v=hVal(s,i);
+    if(v>0) rows.push({k:hName(s.key),v,c:colorFor(s.key)});
+  }
+  rows.sort((a,b)=>b.v-a.v);
+  const tot=rows.reduce((a,b)=>a+b.v,0);
+  const lab=HDIR==='tx'?'上行':HDIR==='rx'?'下行':'合计';
+  let html=`<div class="hd">${when} · ${lab} ${bsize(tot)}</div>`;
+  html+=rows.slice(0,6).map(r=>
+    `<div class="r"><span><span class="sw" style="background:${r.c}"></span>${esc(r.k)}</span><b>${bsize(r.v)}</b></div>`
+  ).join('');
+  if(rows.length>6) html+=`<div class="r sub"><span>还有 ${rows.length-6} 项</span><b></b></div>`;
+  tip.innerHTML=html;
+  tip.style.display='block';
+  const x=GEO.X(i), tw=tip.offsetWidth, ww=wrap.clientWidth;
+  let left=x+14;
+  if(left+tw>ww-4) left=x-tw-14;
+  tip.style.left=Math.max(4,left)+'px';
+  tip.style.top='10px';
+}
+
+function renderHist(){
+  if(!HIST) return;
+  $('herr').textContent='';
+  const granLab={'1m':'每分钟','1h':'每小时','1d':'每天'}[HIST.gran]||HIST.gran;
+  $('hsum').textContent=`${HRANGE} · 粒度 ${granLab} · 下行 ${bsize(HIST.total_rx)} · 上行 ${bsize(HIST.total_tx)}`;
+
+  const S=HIST.series||[];
+  // 图例只报百分比，绝对值放进 title：绝对值下面表里就有，而百分比直接回答了
+  // 「为什么只有前三条有颜色」——它们合起来通常已经占了八成。
+  const dirTot=Math.max(1,HDIR==='tx'?HIST.total_tx
+    :HDIR==='rx'?HIST.total_rx:HIST.total_tx+HIST.total_rx);
+  $('hlegend').innerHTML=S.map(s=>{
+    const c=colorFor(s.key), off=HSEL[s.key]?' off':'';
+    const tot=HDIR==='tx'?s.sum_tx:HDIR==='rx'?s.sum_rx:s.sum_tx+s.sum_rx;
+    const pct=tot/dirTot*100;
+    const ptxt=pct>=0.05?(pct>=10?pct.toFixed(0):pct.toFixed(1))+'%':'<0.1%';
+    return `<span class="it${off}" data-k="${esc(s.key)}"`
+      +` title="${esc(hName(s.key))} · ${bsize(tot)}"><i style="background:${c}"></i>`
+      +`${esc(hName(s.key))} · ${ptxt}</span>`;
+  }).join('');
+
+  const all=Math.max(1,HIST.total_tx+HIST.total_rx);
+  const rows=S.map(s=>{
+    const tot=s.sum_tx+s.sum_rx, pct=tot/all*100;
+    return {name:hName(s.key),rx:s.sum_rx,tx:s.sum_tx,tot:tot,pct:pct,cont:!!s.cont};
+  });
+  const dimLab={total:'项目',svc:'应用',proc:'进程',cont:'容器',iface:'网卡'}[HDIM]||'项目';
+  renderTable($('hbox'),[
+    // 应用维度带图标，和排行页一致：一眼认出是哪个 app，不用先读名字。
+    // 「其他」是聚合出来的尾项，给它一个首字母图标反而像真的应用。
+    // 容器流量在独立 netns 里、只能按容器名归集，标一下免得和应用名混在一起分不清。
+    {k:'name',label:dimLab,head:true,cell:r=>(HDIM==='svc'&&r.name!=='其他'?iconOf(r.name,'inl')+' ':'')
+      +`<span class="pname">${esc(r.name)}</span>`+(r.cont?'<span class="tag">容器</span>':'')},
+    {k:'rx',label:'下行',cls:'r',cell:r=>`<span style="color:var(--down)">${bsize(r.rx)}</span>`},
+    {k:'tx',label:'上行',cls:'r',cell:r=>`<span style="color:var(--up)">${bsize(r.tx)}</span>`},
+    {k:'tot',label:'合计',cls:'r',cell:r=>bsize(r.tot)},
+    // 「占比」和「比例」原来是两列：一个是百分比、一个是条形，说的其实是同一件事，
+    // 名字还几乎一样，读表的人要在两列之间来回确认。合并成一列，和排行页用同一个画法。
+    {k:'bar',label:'占比',w:150,cell:r=>`<div style="display:flex;align-items:center">`
+      +`<div class="track" style="flex:1"><i style="width:${r.pct>0?Math.max(2,Math.round(r.pct)):0}%"></i></div>`
+      +`<span class="pct">${r.pct>=0.05?r.pct.toFixed(1):'0'}%</span></div>`},
+  ],rows,'该区间暂无数据');
+
+  drawHist();
+}
+
+async function fetchHist(){
+  if(HBUSY) return;
+  HBUSY=true;
+  try{
+    HIST=await getJSON(`history?dim=${encodeURIComponent(HDIM)}&range=${encodeURIComponent(HRANGE)}&top=8`);
+    $('hcsv').href=apiBase()+`export?dim=${encodeURIComponent(HDIM)}&range=${encodeURIComponent(HRANGE)}`;
+    renderHist();
+  }catch(e){
+    $('herr').textContent='历史数据加载失败：'+e.message;
+    HIST=null; drawHist();
+  }finally{ HBUSY=false; }
+}
+
+function segInit(id,cb){
+  const el=$(id);
+  if(!el) return;
+  el.querySelectorAll('b').forEach(b=>{
+    b.onclick=()=>{
+      el.querySelectorAll('b').forEach(x=>x.classList.toggle('on',x===b));
+      cb(b.dataset.v);
+    };
+  });
+}
+function syncSeg(id,val){
+  const el=$(id);
+  if(el) el.querySelectorAll('b').forEach(x=>x.classList.toggle('on',x.dataset.v===val));
+}
+segInit('hrange',v=>{HRANGE=v;HSEL={};fetchHist();});
+segInit('hdim',v=>{HDIM=v;HSEL={};fetchHist();});
+segInit('hdir',v=>{HDIR=v;renderHist();});
+segInit('hscale',v=>{HLOG=(v==='log');renderHist();});
+
+// 支持 ?range=7d&dim=cont&dir=rx 深链接
+try{
+  const qp=new URLSearchParams(location.search);
+  if(['1h','6h','24h','7d','30d'].includes(qp.get('range'))) HRANGE=qp.get('range');
+  if(['total','svc','proc','cont','iface'].includes(qp.get('dim'))) HDIM=qp.get('dim');
+  if(['total','tx','rx'].includes(qp.get('dir'))) HDIR=qp.get('dir');
+}catch(e){}
+syncSeg('hrange',HRANGE); syncSeg('hdim',HDIM); syncSeg('hdir',HDIR);
+syncSeg('hscale',HLOG?'log':'lin');
+
+$('hlegend').onclick=e=>{
+  const it=e.target.closest('.it');
+  if(!it) return;
+  const k=it.dataset.k;
+  if(HSEL[k]) delete HSEL[k]; else HSEL[k]=true;
+  renderHist();
+};
+
+function hoverAt(clientX){
+  if(!GEO.n) return;
+  const r=$('hchart').getBoundingClientRect();
+  const mx=clientX-r.left;
+  if(mx<GEO.padL||mx>GEO.padL+GEO.pw){
+    if(HOVER!==-1){HOVER=-1;paint(-1);$('htip').style.display='none';}
+    return;
+  }
+  const i=Math.max(0,Math.min(GEO.n-1,Math.round((mx-GEO.padL)/GEO.pw*(GEO.n-1))));
+  if(i!==HOVER){ HOVER=i; paint(i); showTip(i); }
+}
+$('hchart').addEventListener('mousemove',e=>hoverAt(e.clientX));
+$('hchart').addEventListener('mouseleave',()=>{HOVER=-1;paint(-1);$('htip').style.display='none';});
+// 手机上用手指滑动看数值
+$('hchart').addEventListener('touchstart',e=>{if(e.touches[0])hoverAt(e.touches[0].clientX);},{passive:true});
+$('hchart').addEventListener('touchmove',e=>{if(e.touches[0])hoverAt(e.touches[0].clientX);},{passive:true});
+$('hchart').addEventListener('touchend',()=>{
+  setTimeout(()=>{HOVER=-1;paint(-1);$('htip').style.display='none';},1600);
+});
+
+window.addEventListener('resize',()=>{ if(TAB==='hist'&&HIST) drawHist(); });
+
+/* ================= 外联 / 拦截 ================= */
+let PEERS=null, PEERSBUSY=false, FW=null, RULES=null, FWBUSY=false, LAST_PENDING=null;
+
+// 容器 cgroup 路径里带完整 64 位 ID，整串显示会把表格撑爆
+function shortCg(cg){
+  if(!cg) return '';
+  const m=cg.match(/docker-([0-9a-f]{12})[0-9a-f]*\.scope/);
+  return m ? cg.replace(m[0],'docker-'+m[1]+'…') : cg;
+}
+/* 可执行路径只留末尾两段（…/bin/node），整串进 title。
+   原来整条路径铺在副行里，/var/apps/trim.media/target/bin/node 这种
+   在有应用名的行里会折成第三行——一页里 37px 和 52px 的行高混着排，
+   看着像表格坏了一半。而且真正的信息是「这个 node 装在哪」，
+   前两段 /var/apps/<包名> 和主标题里的应用名本来就是同一件事。 */
+function shortPath(p){
+  if(!p) return '';
+  const seg=p.split('/').filter(Boolean);
+  return seg.length>2 ? '…/'+seg.slice(-2).join('/') : p;
+}
+function contTag(cont,proc){
+  if(!cont) return '';
+  return cont===proc ? '<span class="tag">容器</span>' : `<span class="tag">${esc(cont)}</span>`;
+}
+
+async function fetchPeers(){
+  if(PEERSBUSY) return;
+  PEERSBUSY=true;
+  try{
+    const q=new URLSearchParams();
+    if($('ponly').checked) q.set('pending','1');
+    if($('ppriv').checked) q.set('private','1');
+    const kw=$('pq').value.trim();
+    if(kw) q.set('q',kw);
+    const j=await getJSON('peers?'+q.toString());
+    PEERS=j;
+    renderPeers();
+    $('pbadge').textContent=j.pending>0?j.pending:'';
+    const pd=$('pdot'); if(pd) pd.textContent=j.pending>0?j.pending:'';
+
+    // 待裁决数量增加时弹一次提示，不打断操作
+    if(LAST_PENDING!==null && j.pending>LAST_PENDING && TAB!=='peers'){
+      const fresh=(j.peers||[]).filter(p=>!p.verdict).slice(0,2)
+        .map(p=>(p.svc||p.proc)+' → '+(p.domain||p.ip));
+      if(fresh.length) toast('新外联：'+fresh.join('，'));
+    }
+    LAST_PENDING=j.pending;
+  }catch(e){
+    $('peerBox').innerHTML=`<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }finally{ PEERSBUSY=false; }
+}
+
+function renderPeers(){
+  const list=(PEERS&&PEERS.peers)||[];
+  $('pcount').textContent=`${list.length} 条`
+    +(PEERS?` · 共 ${PEERS.total} · 待裁决 ${PEERS.pending}`:'');
+
+  const rows=list.map(p=>{
+    const verdict=p.verdict==='allow'?'<span class="pill on">已允许</span>'
+      :p.verdict==='deny'?'<span class="pill err">已阻止</span>'
+      :'<span class="pill off">未裁决</span>';
+    const P=esc(p.proc), IP=esc(p.ip), DM=esc(p.domain||'');
+    const acts=p.verdict
+      ? `<button class="btn sm" data-act="clear" data-p="${P}" data-ip="${IP}">撤销</button>`
+      : `<button class="btn sm ok" data-act="allow" data-p="${P}" data-ip="${IP}">允许</button>
+         <button class="btn sm bad" data-act="deny" data-p="${P}" data-ip="${IP}">阻止 IP</button>
+         ${p.domain?`<button class="btn sm bad" data-act="denydom" data-p="${P}" data-ip="${IP}" data-dom="${DM}">阻止域名</button>`:''}`;
+    return {
+      proc:p.proc, cont:p.cont, svc:p.svc, path:p.path, hash:p.hash, cg:p.cg,
+      ip:p.ip, port:p.port, proto:p.proto, domain:p.domain, domainN:p.domain_n,
+      cc:p.cc, cname:p.cname, region:p.region, city:p.city, asnOrg:p.asn_org,
+      first:p.first, hits:p.hits, traffic:p.tx+p.rx, verdict:verdict, acts:acts,
+      __cls:p.verdict?'':'newrow'
+    };
+  });
+
+  renderTable($('peerBox'),[
+    {k:'proc',label:'应用 / 进程',head:true,cell:p=>{
+      // 主标题永远是「用户认得的那一层」：有应用名就写应用名（和连接页、
+      // 系统资源管理器一个排法），拿不到应用名（进程最近没流量）才退回进程名。
+      const title=(p.svc&&p.svc!==p.proc)
+        ?`${iconOf(p.svc,'inl')}<span class="pname">${esc(p.svc)}</span>${contTag(p.cont,p.svc)}`
+        :`<span class="pname">${esc(p.proc)}</span>${contTag(p.cont,p.proc)}`;
+      // 副行固定一行：进程名（和应用名重复就不写）+ 路径末尾两段 + 哈希徽标。
+      // 行数固定，行高才不会 37/52 混排。
+      const parts=[];
+      if(p.svc&&p.svc!==p.proc&&p.proc) parts.push(`<span class="mono">${esc(p.proc)}</span>`);
+      const sp=shortPath(p.path);
+      if(sp) parts.push(`<span class="mono">${esc(sp)}</span>`);
+      else if(p.cg) parts.push(`<span class="mono">${esc(shortCg(p.cg))}</span>`);
+      return title+`<div class="sub psub" title="${esc(p.path||p.cg||'')}">`
+        +(parts.join('<span class="sep">·</span>')||'–')
+        +(p.hash?` <span class="cc">${esc(p.hash)}</span>`:'')+`</div>`;
+    }},
+    {k:'remote',label:'远端',grow:true,cell:p=>{
+      let s=`<span class="mono">${esc(p.ip)}</span><span class="sub">:${p.port}</span>`
+        +`<span class="sub" style="margin-left:7px">${esc((p.proto||'').toUpperCase())}</span>`;
+      if(p.domain){
+        s+=`<div class="dom">${esc(p.domain)}${p.domainN>0?`<em>+${p.domainN}</em>`:''}</div>`;
+      }
+      if(p.cname||p.asnOrg){
+        // 国家 + 城市直接显示（装了 City 库才有城市），ASN 组织跟在后面
+        const where=[p.cname,p.city].filter(Boolean).join(' · ');
+        s+=`<div class="sub">${where?`<span class="cc">${esc(where)}</span> `:''}${esc(p.asnOrg||'')}</div>`;
+      }
+      return s;
+    }},
+    {k:'first',label:'首次见到',cls:'r',cell:p=>`<span class="sub" title="${fmtTime(p.first)}">${ago(p.first)}</span>`},
+    {k:'hits',label:'连接次数',cls:'r',cell:p=>`<span class="sub">${p.hits}</span>`},
+    {k:'traffic',label:'流量',cls:'r',cell:p=>`<span class="sub">${bsize(p.traffic)}</span>`},
+    {k:'verdict',label:'状态',cls:'r',cell:p=>p.verdict},
+    {k:'acts',label:'操作',cls:'acts',cell:p=>p.acts},
+  ],rows,'还没有记录到外联。程序发起新连接后这里就会出现。');
+}
+
+async function peerVerdict(proc,ip,verdict,scope,domain){
+  const body={proc,ip,verdict};
+  if(scope) body.scope=scope;
+  if(domain) body.domain=domain;
+  const j=await postJSON('peers/verdict',body);
+  if(j.msg) toast(j.msg);
+  if(j.fw) FW=j.fw;
+  await fetchPeers();
+  if(FW) renderFw();
+}
+
+async function fetchFw(){
+  if(FWBUSY) return;
+  FWBUSY=true;
+  try{
+    const j=await getJSON('rules');
+    RULES=j.rules||[]; FW=j.fw||{};
+    renderFw();
+  }catch(e){
+    $('fwbody').innerHTML=`<div class="sub" style="color:var(--bad)">加载失败：${esc(e.message)}</div>`;
+    $('ruleBox').innerHTML='';
+  }finally{ FWBUSY=false; }
+}
+
+function renderFw(){
+  const f=FW||{};
+  const st=!f.available?'<span class="pill err">不可用</span>'
+    :f.enforce?'<span class="pill on">已启用</span>':'<span class="pill off">未启用</span>';
+  let html=`<div class="statline">
+    <div class="t">出向拦截</div>${st}
+    <div class="d">${f.available?esc(f.version||'nft'):esc(f.reason||'')}</div>
+    <label class="switch"><input type="checkbox" id="fwen" ${f.enforce?'checked':''} ${f.available?'':'disabled'}><span></span></label>
+  </div>`;
+
+  if(!f.available){
+    html+=`<div class="warnbox">这台机器上用不了 nftables 的按进程匹配，只能观测、不能拦截。
+      「外联」页点「阻止」仍然会记录，但不会真的断开连接。</div>`;
+  }else{
+    html+=`<div class="warnbox">
+      <b>开启前先看这三条：</b><br>
+      · 只拦出向，且只作用于公网地址。回环、内网段、组播永远放行，SSH 和内网访问不受影响。<br>
+      · 规则靠 cgroup 匹配进程，服务重启后依然有效；进程换 cgroup 会失配，会在下面标红。<br>
+      · 万一真的连不上了：SSH 里执行 <code>nft delete table inet fnnetmon</code> 立刻恢复。</div>`;
+  }
+  html+=`<div class="toolbar" style="margin-bottom:0">
+    <span class="sub">已下发 ${f.applied||0} 条 · 库中 ${(RULES||[]).length} 条${f.updated?' · 更新于 '+esc(f.updated):''}</span>
+    <div class="grow"></div>
+    <button class="btn danger" id="fwpanic" ${f.available?'':'disabled'}>紧急停止</button>
+  </div>`;
+  if(f.last_err) html+=`<div class="sub" style="color:var(--bad);margin-top:8px">${esc(f.last_err)}</div>`;
+  $('fwbody').innerHTML=html;
+  renderRules();
+}
+
+function renderRules(){
+  const list=RULES||[];
+  const rows=list.map(r=>{
+    const act=r.action==='deny'?'<span class="pill err">阻止</span>':'<span class="pill on">允许</span>';
+    let tgt;
+    if(r.kind==='domain'){
+      tgt=`<span class="dom">${esc(r.domain)}</span>`
+        +`<div class="sub">${r.ips?`已展开 ${r.ips} 个地址`:'尚未解析到地址'}</div>`;
+    }else{
+      tgt=r.ip?`<span class="mono">${esc(r.ip)}${r.port?':'+r.port:''}</span>`
+              :'<span class="sub">该进程所有出向</span>';
+    }
+    return {r:r,act:act,tgt:tgt};
+  });
+  renderTable($('ruleBox'),[
+    {k:'proc',label:'进程 / cgroup',head:true,cell:x=>{
+      let s=`<span class="pname">${esc(x.r.proc||'—')}</span>${contTag(x.r.cont,x.r.proc)}`;
+      s+=`<div class="sub mono" title="${esc(x.r.cg||'')}">${esc(shortCg(x.r.cg||''))}</div>`;
+      if(x.r.err) s+=`<div class="sub" style="color:var(--bad)">${esc(x.r.err)}</div>`;
+      return s;
+    }},
+    {k:'act',label:'动作',cell:x=>x.act},
+    {k:'tgt',label:'目标',cell:x=>x.tgt},
+    {k:'note',label:'备注',hideM:true,cell:x=>`<span class="sub">${esc(x.r.note||'')}</span>`},
+    {k:'created',label:'创建',cls:'r',hideM:true,cell:x=>`<span class="sub">${fmtTime(x.r.created)}</span>`},
+    {k:'ops',label:'操作',cls:'acts',cell:x=>
+      `<label class="switch"><input type="checkbox" class="rtog" data-id="${x.r.id}" ${x.r.enabled?'checked':''}><span></span></label>
+       <button class="btn sm" data-del="${x.r.id}" style="margin-left:8px">删除</button>`},
+  ],rows,'还没有规则。在「外联」页点「阻止」会自动生成一条。');
+}
+
+async function setFwEnforce(on){
+  try{
+    const j=await postJSON('firewall',{enforce:on});
+    FW=j.fw; renderFw();
+    toast(on?'已启用出向拦截':'已关闭，恢复全部放行');
+  }catch(e){
+    toast('操作失败：'+e.message);
+    fetchFw();
+  }
+}
+
+/* ================= 自检 / 域名状态 ================= */
+let SC=null, SCBUSY=false, DNS=null;
+
+async function fetchSelfCheck(){
+  if(SCBUSY) return;
+  SCBUSY=true;
+  try{
+    SC=await getJSON('selfcheck');
+    renderSelfCheck();
+  }catch(e){
+    $('schint').textContent='获取失败：'+e.message;
+  }finally{ SCBUSY=false; }
+}
+
+function renderSelfCheck(){
+  if(!SC) return;
+  const badge=SC.verdict==='ok'?'<span class="pill on">正常</span>'
+    :SC.verdict==='warn'?'<span class="pill warn">注意</span>'
+    :'<span class="pill err">异常</span>';
+  const c=SC.collect||{};
+  $('schint').innerHTML=badge
+    +` 运行 ${dur(SC.uptime_sec||0)} · 采集 ${c.ticks||0} 次`
+    +(c.avg_ms?` · 平均 ${c.avg_ms.toFixed(1)}ms`:'');
+
+  $('scgrid').innerHTML=(SC.checks||[]).map(x=>{
+    const cls=x.level==='ok'?'':x.level;
+    return `<div class="scitem ${cls}">
+      <div class="k">${esc(x.name)}</div>
+      <div class="v">${esc(x.value)}</div>
+      ${x.note?`<div class="n">${esc(x.note)}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+// 地理库卡片：有省市就直接说「国家 + 省市」，没有就给一个能点的安装入口。
+// 让用户去 SSH 里敲 fnnetmon geo fetch 是不合理的——他自己发现的界面问题，
+// 就应该在界面上解决。
+let GEOJOB={running:false,phase:''}, GEOPOLL=null;
+function geoPoll(on){
+  if(on&&!GEOPOLL) GEOPOLL=setInterval(fetchDNS,1000);
+  if(!on&&GEOPOLL){ clearInterval(GEOPOLL); GEOPOLL=null; }
+}
+function geoCardNote(g,job){
+  if(!g.available) return '把 mmdb 放进数据目录即可';
+  const base=esc(g.source||'内置')+' · 构建 '+(g.build||'—');
+  if(g.city){
+    return base+`<div class="geoact"><button class="btn sm" id="georm">删除省市数据</button></div>
+      <div class="n" style="margin-top:5px">省出约 48MB</div>`;
+  }
+  if(job&&job.running){
+    const pct=job.total>0?Math.min(100,Math.round(job.done*100/job.total)):0;
+    const mb=n=>(n/1048576).toFixed(1);
+    const lab=job.phase==='verifying'?'校验中…'
+      :job.phase==='reloading'?'正在加载…'
+      :`正在下载 ${mb(job.done)} / ${mb(job.total)} MB`;
+    return base+`<div class="gbar"><i style="width:${pct||3}%"></i></div>
+      <div class="n" style="margin-top:5px">${lab}${job.total?'（'+pct+'%）':''}</div>`;
+  }
+  const fail=job&&job.phase==='failed'
+    ?`<div class="n" style="color:var(--bad);margin-top:4px">上次失败：${esc(job.err||'')}</div>`:'';
+  return base+`<div class="geoact"><button class="btn sm" id="geofetch">安装省市数据</button></div>
+    <div class="n" style="margin-top:5px">约 48MB，装完不用重启</div>${fail}`;
+}
+
+async function fetchDNS(){
+  try{
+    const j=await getJSON('dns');
+    DNS=j;
+    const s=j.stats||{}, g=j.geo||{}, job=j.geo_job||{};
+    // 装完 / 装挂了都要说一声，否则进度条一消失用户不知道成没成
+    if(GEOJOB.running&&!job.running){
+      if(job.phase==='done') toast('省市数据已装好，连接列表现在能看到城市了');
+      else if(job.phase==='failed') toast('安装失败：'+(job.err||'未知原因'));
+    }
+    GEOJOB=job;
+    geoPoll(!!job.running);
+    $('dnsHint').innerHTML=s.running
+      ? '<span class="pill on">抓包中</span>'
+      : '<span class="pill err">未运行</span>';
+    $('dnsGrid').innerHTML=`
+      <div class="scitem"><div class="k">已识别域名</div><div class="v">${s.domains||0}</div>
+        <div class="n">${s.ips||0} 个地址已建立映射</div></div>
+      <div class="scitem"><div class="k">DNS 应答</div><div class="v">${s.answered||0}</div>
+        <div class="n">共收到 ${s.packets||0} 个报文</div></div>
+      <div class="scitem ${g.available?'':'warn'}"><div class="k">地理 / ASN</div>
+        <div class="v">${g.available?(g.city?'国家 + 省市':'国家'):'未启用'}</div>
+        <div class="n">${geoCardNote(g,job)}</div></div>`;
+    $('dnsNote').textContent=s.running
+      ? `来源：${s.src||'AF_PACKET'}。只解析 DNS 应答里的 A/AAAA 记录，不抓任何载荷内容。`
+        +(s.last_q?` 最近一条：${s.last_q}`:'')
+      : (s.err||'域名归因需要 CAP_NET_RAW 权限');
+  }catch(e){
+    $('dnsNote').textContent='域名状态获取失败：'+e.message;
+  }
+}
+
+/* ================= 告警 ================= */
+let AL=null, ALKIND='rate';
+async function fetchAlerts(){
+  try{ AL=await getJSON('alerts'); renderAlerts(); }
+  catch(e){ $('alHint').textContent='获取失败：'+e.message; }
+}
+function renderAlerts(){
+  if(!AL) return;
+  $('alOn').checked=!!AL.enabled;
+  $('alHook').value=AL.webhook||'';
+  $('alHint').innerHTML=(AL.enabled?'<span class="pill on">已启用</span>':'<span class="pill off">未启用</span>')
+    +(AL.last_sent?` · 最近发送 ${esc(AL.last_sent)}`:'')
+    +(AL.last_err?` · <span style="color:var(--bad)">${esc(AL.last_err)}</span>`:'');
+  const rs=AL.rules||[];
+  $('alRsub').textContent=`${rs.length} 条`;
+  if(!rs.length){
+    $('alRules').innerHTML='<div class="empty">还没有规则。加一条「影视 超过 1024 KB/s 提醒我」试试。</div>';
+  }else{
+    renderTable($('alRules'),[
+      {k:'name',label:'规则',head:true,cell:r=>`<span class="pname">${esc(r.name||r.match||'全部流量')}</span>`},
+      {k:'match',label:'匹配',cell:r=>r.match?`<span class="mono">${esc(r.match)}</span>`:'<span class="sub">全部</span>'},
+      {k:'kind',label:'类型',cell:r=>r.kind==='total'?`累计 ${r.window_min} 分钟`:'实时速率'},
+      {k:'th',label:'阈值',cls:'r',cell:r=>`${r.threshold} ${r.kind==='total'?'MB':'KB/s'}`},
+      {k:'cd',label:'冷却',cls:'r',cell:r=>`${r.cooldown_min} 分钟`},
+      {k:'act',label:'操作',cls:'acts',cell:r=>`<button class="btn sm" data-delrule="${r.id}">删除</button>`},
+    ],rs,'');
+  }
+  const evs=AL.events||[];
+  if(!evs.length){
+    $('alEvents').innerHTML='<div class="empty">还没有触发过。</div>';
+  }else{
+    renderTable($('alEvents'),[
+      {k:'at',label:'时间',head:true,cell:e=>fmtTime(e.at)},
+      {k:'rule',label:'规则',cell:e=>`<span class="pname">${esc(e.rule)}</span>`},
+      {k:'val',label:'触发值',cls:'r',cell:e=>`${e.value} ${esc(e.unit)}`},
+      {k:'st',label:'推送',cls:'r',cell:e=>e.sent?'<span class="pill on">已发送</span>'
+        :`<span class="pill err" title="${esc(e.err||'')}">失败</span>`},
+    ],evs,'');
+  }
+}
+async function saveAlerts(){
+  if(!AL) return;
+  try{
+    AL=await postJSON('alerts',{enabled:$('alOn').checked,webhook:$('alHook').value.trim(),rules:AL.rules||[]});
+    renderAlerts(); toast('告警设置已保存');
+  }catch(e){ toast('保存失败：'+e.message); }
+}
+
+/* ================= 标签切换 ================= */
+const TABS=['ov','rank','conn','cont','hist','peers','alert','fw'];
+function selectTab(name){
+  if(!TABS.includes(name)) name='ov';
+  TAB=name;
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x.dataset.t===name));
+  // 底栏没有「容器/历史/拦截」的格子，它们都收在「更多」里，所以高亮「更多」
+  const moreOn=['cont','hist','alert','fw'].includes(name);
+  document.querySelectorAll('#tabbar .tb').forEach(x=>{
+    x.classList.toggle('on', x.dataset.more ? moreOn : x.dataset.t===name);
+  });
+  TABS.forEach(v=>$('view-'+v).classList.toggle('hide',v!==name));
+  if(name==='hist') fetchHist();
+  if(name==='peers') fetchPeers();
+  if(name==='fw') fetchFw();
+  if(name==='alert') fetchAlerts();
+  if(name==='ov'){ fetchSelfCheck(); fetchDNS(); }
+  if(name==='rank'){ if(rLive()){ if(DATA) renderRankLive(DATA); } else fetchRank(); }
+  if(DATA) render(DATA);
+  // 切页回到顶部：手机上切完还停在上一页的滚动位置会让人以为没反应
+  window.scrollTo({top:0,behavior:'auto'});
+}
+let TAB='ov';
+
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  history.replaceState(null,'','#'+t.dataset.t);
+  selectTab(t.dataset.t);
+  // 让被点的标签滚进可视区（手机上标签栏是横向滚动的）
+  t.scrollIntoView({block:'nearest',inline:'center',behavior:'smooth'});
+});
+window.addEventListener('hashchange',()=>selectTab(location.hash.slice(1)));
+
+/* ================= 主题 =================
+   auto 时不设 data-theme，交给 prefers-color-scheme；
+   light/dark 时设属性，属性选择器优先级高于 :root，能压过系统偏好。 */
+const THEMES=['auto','light','dark'];
+const THEME_TEXT={auto:'跟随系统',light:'浅色',dark:'深色'};
+let THEME=localStorage.getItem('fnm.theme')||'auto';
+function applyTheme(t){
+  THEME=THEMES.includes(t)?t:'auto';
+  if(THEME==='auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme',THEME);
+  try{ localStorage.setItem('fnm.theme',THEME); }catch(e){}
+  const el=$('themeNow'); if(el) el.textContent=THEME_TEXT[THEME];
+  // 历史曲线是 canvas，颜色在绘制时取计算样式。不重画的话，
+  // 切到深色后曲线还是浅色那套（浅灰在深底上反而最亮）。
+  if(typeof HIST!=='undefined'&&HIST) renderHist();
+}
+applyTheme(THEME);
+$('themebtn').onclick=()=>applyTheme(THEMES[(THEMES.indexOf(THEME)+1)%THEMES.length]);
+// auto 模式下系统主题变了也要重画曲线（canvas 不会自己跟着 CSS 变）
+try{
+  matchMedia('(prefers-color-scheme: dark)')
+    .addEventListener('change',()=>{ if(THEME==='auto'&&HIST) renderHist(); });
+}catch(e){}
+
+/* ================= 移动端导航 ================= */
+$('tabbar').addEventListener('click',e=>{
+  const tb=e.target.closest('.tb'); if(!tb) return;
+  if(tb.dataset.more){ $('sheet').classList.add('on'); return; }
+  history.replaceState(null,'','#'+tb.dataset.t);
+  selectTab(tb.dataset.t);
+});
+$('sheetIn').addEventListener('click',e=>{
+  const it=e.target.closest('.it'); if(!it) return;
+  if(it.id==='sheetTheme'){
+    applyTheme(THEMES[(THEMES.indexOf(THEME)+1)%THEMES.length]);
+    toast('主题：'+THEME_TEXT[THEME]);
+    return;
+  }
+  $('sheet').classList.remove('on');
+  history.replaceState(null,'','#'+it.dataset.t);
+  selectTab(it.dataset.t);
+});
+$('sheet').addEventListener('click',e=>{
+  if(e.target.id==='sheet') $('sheet').classList.remove('on');
+});
+
+// 连接表头点击排序
+document.addEventListener('click',e=>{
+  const th=e.target.closest('#connBox th[data-k]');
+  if(th){
+    const k=th.dataset.k;
+    if(SORT.key===k) SORT.dir*=-1; else {SORT.key=k;SORT.dir=-1;}
+    CSIG='';                      // 排序变了，必须重建（否则只刷数字不换位置）
+    if(DATA) renderConns(DATA);
+    return;
+  }
+  // 点分组头展开/折叠。只改 class，不重绘整表——重绘会丢滚动位置，
+  // 也会让刚点开的组在下一秒重排时又跑走。
+  const gr=e.target.closest('#connBox tr.grprow');
+  if(gr){
+    CBUSY_AT=Date.now();
+    keepAnchor(gr,()=>{
+      const k=gr.dataset.g;
+      const open=COPEN.has(k);
+      if(open) COPEN.delete(k); else COPEN.add(k);
+      gr.querySelector('.chev')?.classList.toggle('on',!open);
+      let n=gr.nextElementSibling;
+      while(n&&n.classList.contains('child')){
+        n.classList.toggle('hide',open);
+        n=n.nextElementSibling;
+      }
+    });
+  }
+});
+$('q').oninput=e=>{Q=e.target.value; if(DATA) renderConns(DATA);};
+$('cgrp').onchange=e=>{CGRP=e.target.checked; if(DATA) renderConns(DATA);};
+$('hideidle').onchange=()=>{ if(DATA) renderConns(DATA); };
+$('hideloop').onchange=()=>{ if(DATA) renderConns(DATA); };
+$('pq').oninput=()=>{ clearTimeout(window._pqh); window._pqh=setTimeout(fetchPeers,300); };
+$('ponly').onchange=fetchPeers;
+$('ppriv').onchange=fetchPeers;
+
+/* ---- 排行交互 ---- */
+const refreshRank=()=>{ if(rLive()){ if(DATA) renderRankLive(DATA); } else renderRankHist(); };
+segInit('rby',v=>{ RBY=v; ROPEN.clear(); refreshRank(); });
+segInit('rwin',v=>{ RWIN=v; ROPEN.clear(); if(v==='live') refreshRank(); else fetchRank(); });
+$('rq').oninput=e=>{ RQ=e.target.value; refreshRank(); };
+/* 导出的是「区间汇总」，实时模式本身没有区间，退化成最近 1 小时并说明一下，
+   比按钮灰掉更友好 —— 用户点得动，也知道自己拿到的是什么。 */
+$('rcsv').onclick=e=>{
+  const win=rLive()?'1h':RWIN;
+  e.currentTarget.href=apiBase()+`export/rank?range=${encodeURIComponent(win)}&by=${encodeURIComponent(RBY)}`;
+  if(rLive()) toast('实时模式没有区间，已按最近 1 小时导出');
+};
+
+document.addEventListener('click',e=>{
+  const th=e.target.closest('#rankBox th[data-k]');
+  if(th){
+    const k=th.dataset.k;
+    if(RSORT.key===k) RSORT.dir*=-1;
+    else { RSORT.key=k; RSORT.dir=(k==='name'?1:-1); }
+    refreshRank();
+    return;
+  }
+  const ch=e.target.closest('#rankBox .nmwrap[data-rk]');
+  if(!ch) return;
+  const k=ch.dataset.rk;
+  keepAnchor(ch,()=>{
+    if(ROPEN.has(k)) ROPEN.delete(k); else ROPEN.add(k);
+    refreshRank();
+  });
+});
+
+document.addEventListener('click',async e=>{
+  // 地理卡片上的「安装 / 删除省市数据」
+  const gf=e.target.closest('#geofetch');
+  if(gf){
+    gf.disabled=true;
+    try{
+      await postJSON('geo/fetch',{});
+      toast('开始下载省市数据（约 48MB），装好会自动刷新');
+      await fetchDNS();
+    }catch(err){ toast('启动失败：'+err.message); gf.disabled=false; }
+    return;
+  }
+  const gr2=e.target.closest('#georm');
+  if(gr2){
+    gr2.disabled=true;
+    try{
+      await postJSON('geo/remove',{});
+      toast('已删除省市数据，回到只显示国家');
+      await fetchDNS();
+    }catch(err){ toast('删除失败：'+err.message); gr2.disabled=false; }
+    return;
+  }
+});
+
+document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-act]');
+  if(b){
+    const act=b.dataset.act, p=b.dataset.p, ip=b.dataset.ip, dm=b.dataset.dom;
+    const tr=b.closest('tr');
+    b.disabled=true;
+    // 裁决完这一行会从「只看未裁决」的列表里消失，下面的内容整体上移。
+    // 把被点的那一行钉在原地，用户的眼睛就不用重新找位置。
+    await pinAfter('#peerBox',tr,async()=>{
+      try{
+        if(act==='forget'){
+          await postJSON('peers/forget',{proc:p,ip});
+          toast('已忽略，下次再连会重新提示');
+          await fetchPeers();
+        }else if(act==='denydom'){
+          await peerVerdict(p,ip,'deny','domain',dm);
+        }else{
+          await peerVerdict(p,ip,act==='clear'?'':act);
+        }
+      }catch(err){ toast('失败：'+err.message); }
+    });
+    b.disabled=false;
+    return;
+  }
+  const del=e.target.closest('[data-del]');
+  if(del){
+    try{
+      const j=await postJSON('rules/delete',{id:Number(del.dataset.del)});
+      FW=j.fw; await fetchFw(); toast('规则已删除');
+    }catch(err){ toast('失败：'+err.message); }
+    return;
+  }
+  if(e.target.id==='fwpanic'){
+    if(!confirm('确定清空所有拦截规则并关闭拦截？')) return;
+    try{
+      const j=await postJSON('firewall/panic',{});
+      FW=j.fw; await fetchFw(); toast('已清空，全部放行');
+    }catch(err){ toast('失败：'+err.message); }
+  }
+});
+
+document.addEventListener('change',async e=>{
+  if(e.target.id==='fwen'){ await setFwEnforce(e.target.checked); return; }
+  if(e.target.classList.contains('rtog')){
+    try{
+      const j=await postJSON('rules/toggle',{id:Number(e.target.dataset.id),enabled:e.target.checked});
+      FW=j.fw; await fetchFw();
+    }catch(err){ toast('失败：'+err.message); fetchFw(); }
+  }
+});
+
+/* ---- 告警交互 ---- */
+segInit('alKind',v=>{
+  ALKIND=v;
+  $('alUnit').textContent=v==='total'?'MB':'KB/s';
+  $('alWin').style.display=v==='total'?'':'none';
+});
+$('alSave').onclick=saveAlerts;
+$('alOn').onchange=saveAlerts;
+$('alTest').onclick=async()=>{
+  try{ await postJSON('alerts/test',{}); toast('测试消息已发送，去看看收到没有'); }
+  catch(e){ toast('发送失败：'+e.message); }
+};
+$('alAdd').onclick=async()=>{
+  if(!AL){ toast('还没读到配置，稍后再试'); return; }
+  const th=parseFloat($('alTh').value);
+  if(!(th>0)){ toast('阈值要填一个正数'); return; }
+  AL.rules=[...(AL.rules||[]),{
+    name:$('alName').value.trim(), match:$('alMatch').value.trim(), kind:ALKIND,
+    threshold:th, window_min:parseInt($('alWin').value||'60',10)||60, cooldown_min:30,
+  }];
+  await saveAlerts();
+  $('alName').value=''; $('alMatch').value=''; $('alTh').value='';
+};
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-delrule]');
+  if(!b||!AL) return;
+  AL.rules=(AL.rules||[]).filter(r=>String(r.id)!==b.dataset.delrule);
+  saveAlerts();
+});
+
+/* ================= 主循环 ================= */
+let DATA=null;
+function render(d){
+  renderHeader(d);
+  if(TAB==='ov') renderOv(d);
+  if(TAB==='conn') renderConns(d);
+  if(TAB==='rank'&&rLive()) renderRankLive(d);
+  if(TAB==='cont'){
+    const cs=d.conts||[], m=d.meta||{};
+    const mapped=cs.filter(c=>c.veth).length;
+    $('conthint').innerHTML=`· ${cs.length} 个容器，${mapped} 个已映射 veth`
+      +(mapped<cs.length?` <span style="color:var(--bad)">· ${cs.length-mapped} 个未映射</span>`:'')
+      +(m.docker_ok?'':` <span style="color:var(--bad)">· Docker 不可用</span>`);
+    renderRank($('contBox'),cs,'容器');
+  }
+}
+
+let fails=0, POLLING=false;
+async function poll(){
+  // 页面在后台时不请求：手机上切走还每秒拉一次，既费电又费流量。
+  // 切回来由 visibilitychange 立刻补一次，不会看到过期数据。
+  if(document.hidden){ setTimeout(poll,2000); return; }
+  POLLING=true;
+  try{
+    const r=await fetch(apiUrl(),{cache:'no-store'});
+    DATA=JSON.parse(await r.text());
+    fails=0; $('banner').style.display='none';
+    pushSpark(DATA);
+    render(DATA);
+  }catch(e){
+    fails++;
+    $('pulse').className='pulse err';
+    if(fails>2){
+      $('banner').style.display='block';
+      $('banner').textContent='采集接口异常：'+e.message+'（'+apiUrl()+'）';
+    }
+  }
+  POLLING=false;
+  setTimeout(poll,1000);
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden && !POLLING) poll();
+});
+
+setInterval(()=>{ if(TAB==='hist') fetchHist(); },30000);
+setInterval(()=>{ if(TAB==='rank'&&!rLive()) fetchRank(); },15000);
+setInterval(()=>{ if(TAB==='peers') fetchPeers(); },5000);
+setInterval(()=>{ if(TAB==='fw') fetchFw(); },5000);
+// 不在外联页时也要更新顶栏角标，20 秒一次足够
+setInterval(()=>{ if(TAB!=='peers') fetchPeers(); },20000);
+setInterval(()=>{ if(TAB==='ov') fetchSelfCheck(); },30000);
+setInterval(()=>{ if(TAB==='ov') fetchDNS(); },30000);
+
+// 首屏骨架：接口还没回来时先占位，别让用户看到「暂无数据」以为没数据
+function renderSkeleton(){
+  $('kpis').innerHTML=`<div class="kpi dual">
+      <div class="kv">
+        <div><div class="sk" style="width:54px;height:9px"></div>
+          <div class="sk" style="width:86px;height:19px;margin-top:9px"></div>
+          <div class="sk" style="width:62px;height:9px;margin-top:8px"></div></div>
+        <div><div class="sk" style="width:54px;height:9px"></div>
+          <div class="sk" style="width:76px;height:19px;margin-top:9px"></div>
+          <div class="sk" style="width:58px;height:9px;margin-top:8px"></div></div>
+      </div>
+      <div class="sk" style="width:100%;height:34px;margin-top:9px"></div>
+    </div>`
+    +Array.from({length:2},()=>`<div class="kpi">
+    <div class="sk" style="width:54px;height:9px"></div>
+    <div class="sk" style="width:86px;height:19px;margin-top:9px"></div>
+    <div class="sk" style="width:62px;height:9px;margin-top:8px"></div></div>`).join('');
+  $('topBox').innerHTML='<div class="skcard"><div class="sk" style="width:38%"></div>'
+    +'<div class="sk" style="width:72%"></div><div class="sk" style="width:58%"></div></div>';
+  $('ifaceBox').innerHTML='<div class="sk" style="width:100%;height:34px"></div>';
+}
+
+selectTab(location.hash.slice(1));
+renderSkeleton();
+poll();
+</script>
+</body>
+</html>

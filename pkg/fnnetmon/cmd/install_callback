@@ -1,0 +1,10 @@
+#!/bin/bash
+# 安装后：修正权限 + 落一份安装时诊断快照
+BIN="${TRIM_APPDEST}/bin/fnnetmon"
+chmod +x "${BIN}" 2>/dev/null
+mkdir -p "${TRIM_PKGVAR}" "${TRIM_PKGETC}"
+
+if [ -x "${BIN}" ]; then
+    "${BIN}" diag --out "${TRIM_PKGVAR}/diag-install.json" >/dev/null 2>&1
+fi
+exit 0

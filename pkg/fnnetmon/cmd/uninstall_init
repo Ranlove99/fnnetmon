@@ -1,0 +1,23 @@
+#!/bin/bash
+# 卸载前：确保 root 进程、socket、以及**残留的 nftables 规则**都被彻底清理。
+# 最后一条最关键：如果不清，卸载后用户网络会被一条看不见的规则拦着，极难排查。
+
+BIN="${TRIM_APPDEST}/bin/fnnetmon"
+
+pkill -f "fnnetmon serve" 2>/dev/null
+sleep 1
+
+if [ -x "${BIN}" ]; then
+    "${BIN}" firewall off --var "${TRIM_PKGVAR}" >> "${TRIM_PKGVAR}/uninstall.log" 2>&1
+fi
+
+# 二进制已经不可用时直接调 nft 兜底
+if command -v nft >/dev/null 2>&1; then
+    nft delete table inet fnnetmon 2>/dev/null
+    nft delete table inet fnnetmon_stat 2>/dev/null
+    nft delete table inet fnnetmon_probe 2>/dev/null
+fi
+
+rm -f "${TRIM_APPDEST}/app.sock" "${TRIM_APPDEST}/collector.sock" 2>/dev/null
+rm -f "${TRIM_PKGVAR}/app.pid" 2>/dev/null
+exit 0

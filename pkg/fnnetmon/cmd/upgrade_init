@@ -1,0 +1,7 @@
+#!/bin/bash
+# 升级前：停服务，备份数据
+if [ -x "${TRIM_APPDEST}/cmd/main" ]; then
+    "${TRIM_APPDEST}/cmd/main" stop
+fi
+[ -f "${TRIM_PKGVAR}/fnnetmon.db" ] && cp -f "${TRIM_PKGVAR}/fnnetmon.db" "${TRIM_PKGVAR}/fnnetmon.db.bak" 2>/dev/null
+exit 0

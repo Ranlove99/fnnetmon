@@ -1,0 +1,23 @@
+# 统一换行，避免 shell 脚本在 Windows checkout 时被换成 CRLF。
+# pkg/fnnetmon/cmd/* 是没有扩展名的安装/卸载钩子，CRLF 会让它们直接执行失败。
+* text=auto eol=lf
+
+*.go           text eol=lf
+*.py           text eol=lf
+*.md           text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+*.html         text eol=lf
+*.sh           text eol=lf
+/build.sh      text eol=lf
+/pkg/fnnetmon/cmd/*      text eol=lf
+/pkg/fnnetmon/config/*   text eol=lf
+/pkg/fnnetmon/manifest   text eol=lf
+/pkg/fnnetmon/app/ui/config text eol=lf
+
+# 二进制：不要做换行转换，也不要当文本 diff
+*.mmdb binary
+*.png  binary
+*.PNG  binary
+*.fpk  binary

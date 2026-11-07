@@ -1,0 +1,54 @@
+# ── Go ──────────────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# 本机直接 go run / go build 出来的无扩展名二进制
+/src/fnnetmon
+
+# ── 本项目构建产物 ───────────────────────────────────────────────────
+/dist/
+/pkg/*.fpk
+/pkg/fnnetmon.fpk
+/pkg/fnnetmon/app/bin/fnnetmon
+/pkg/fnnetmon/app/bin/geo/*.mmdb
+/.manifest.bak
+/fnnetmon-src_*.tar.gz
+
+# ── 本机工具链与缓存（约 1.5GB，绝不入库）────────────────────────────
+/tools/go/
+/tools/gopath/
+/tools/gocache/
+/tools/fnpack
+__pycache__/
+*.py[cod]
+
+# ── 地理数据：City 48MB 按需下载，不入库 ──────────────────────────────
+/data/geo/GeoLite2-City.mmdb
+/data/geo/.GeoLite2-City.*
+
+# ── 运行时状态 ───────────────────────────────────────────────────────
+*.log
+*.pid
+*.sock
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+alerts.json
+firewall.json
+
+# ── 系统与编辑器 ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+.workbuddy-ai/

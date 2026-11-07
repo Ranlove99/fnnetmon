@@ -1,0 +1,36 @@
+#!/bin/bash
+# 安装前：核对包内二进制与本机架构是否匹配。
+#
+# 这里绝不能写死 aarch64。同一个模板会打出 arm / x86 两个包，
+# 0.9.5 和 0.9.6 就是因为这句把 x86 机器挡在门外，而且它自己
+# 写进 TRIM_TEMP_LOGFILE 的报错伪装成系统架构提示，害得排查绕了一整轮。
+# （build.sh 会拦住任何把旧报错文案改回来的提交。）
+#
+# 架构校验的主责在 manifest 的 arch 字段（应用中心读它）。
+# 这里只做一层「包内二进制确实能在这台机器上跑」的复核：
+# 直接读 ELF e_machine，不依赖构建时替换，也不会和 manifest 漂移。
+# 读不到（安装前二进制可能还没落位）就放行，宁可漏检也不能误拒。
+
+[ -n "${TRIM_APPDEST:-}" ] || exit 0
+BIN="${TRIM_APPDEST}/bin/fnnetmon"
+[ -r "$BIN" ] || exit 0
+
+# ELF64 头里 e_machine 在偏移 18 处、2 字节小端：
+#   0x00b7 -> aarch64，0x003e -> x86-64
+MACH="$(od -An -tx1 -j 18 -N 2 "$BIN" 2>/dev/null | tr -d ' \n' | tr 'A-F' 'a-f')"
+case "$MACH" in
+    b700) WANT="aarch64" ;;
+    3e00) WANT="x86_64"  ;;
+    *)    exit 0 ;;       # 不是认识的 ELF / od 不可用：不要拦
+esac
+
+GOT="$(uname -m)"
+case "$GOT" in
+    arm64) GOT="aarch64" ;;
+    amd64) GOT="x86_64"  ;;
+esac
+[ "$GOT" = "$WANT" ] && exit 0
+
+LOG="${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+echo "架构不匹配：这个包里的程序是 ${WANT} 编译的，当前设备是 ${GOT}。请换用对应架构的安装包。" > "$LOG"
+exit 1

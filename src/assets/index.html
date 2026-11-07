@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>流量哨兵 · 环境诊断</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#fff; --line:#e6e8ec; --text:#1c1f23; --sub:#6b7280;
+  --ok:#0f6e56; --okbg:#e1f5ee; --warn:#854f0b; --warnbg:#faeeda;
+  --fail:#a32d2d; --failbg:#fcebeb; --accent:#185fa5;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#16181c; --card:#1f2227; --line:#2f333a; --text:#e8eaed; --sub:#9aa1ab;
+    --ok:#5dcaa5; --okbg:#0f3b31; --warn:#ef9f27; --warnbg:#3d2d10;
+    --fail:#f09595; --failbg:#3d1a1a; --accent:#85b7eb; }
+}
+*{box-sizing:border-box}
+body{margin:0;padding:20px;background:var(--bg);color:var(--text);
+  font:14px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+.wrap{max-width:980px;margin:0 auto}
+header{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+h1{font-size:17px;font-weight:600;margin:0}
+.tag{font-size:12px;color:var(--sub);border:1px solid var(--line);border-radius:99px;padding:1px 9px}
+button{margin-left:auto;font:inherit;font-size:13px;padding:6px 14px;border-radius:8px;
+  border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--accent)}
+button+button{margin-left:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h2{font-size:13px;font-weight:600;color:var(--sub);margin:0 0 12px;letter-spacing:.02em}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px}
+.v{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:var(--bg)}
+.v .dot{width:8px;height:8px;border-radius:50%;margin-top:7px;flex:none}
+.v .k{font-weight:600;font-size:13px;margin-bottom:2px}
+.v .d{font-size:12px;color:var(--sub);word-break:break-word}
+.ok .dot{background:var(--ok)} .warn .dot{background:var(--warn)} .fail .dot{background:var(--fail)}
+.ok{background:var(--okbg)} .warn{background:var(--warnbg)} .fail{background:var(--failbg)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--sub);font-size:12px}
+td.mono,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.kv{display:grid;grid-template-columns:180px 1fr;gap:4px 12px;font-size:13px}
+.kv .k{color:var(--sub)}
+.kv .v2{word-break:break-all}
+.bad{color:var(--fail)} .good{color:var(--ok)} .mid{color:var(--warn)}
+details{margin-top:8px}
+summary{cursor:pointer;font-size:12px;color:var(--sub)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;
+  overflow:auto;max-height:420px;font-size:11.5px;line-height:1.5}
+footer{color:var(--sub);font-size:12px;text-align:center;margin:18px 0 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>流量哨兵 · 环境诊断</h1>
+    <span class="tag" id="ver">v-</span>
+    <span class="tag" id="ts">-</span>
+    <button onclick="load(true)">重新检测</button>
+    <button onclick="copyReport(this)">复制报告</button>
+  </header>
+
+  <div class="card">
+    <h2>关键结论</h2>
+    <div class="grid" id="verdict"></div>
+  </div>
+
+  <div class="card">
+    <h2>系统</h2>
+    <div class="kv" id="sys"></div>
+  </div>
+
+  <div class="card">
+    <h2>内核能力（决定架构是否成立）</h2>
+    <div class="kv" id="kern"></div>
+    <table id="cfg" style="margin-top:12px"></table>
+  </div>
+
+  <div class="card">
+    <h2>网卡</h2>
+    <table id="net"></table>
+  </div>
+
+  <div class="card">
+    <h2>连接归因性能</h2>
+    <div class="kv" id="attr"></div>
+  </div>
+
+  <div class="card">
+    <h2>容器</h2>
+    <div class="kv" id="dock"></div>
+  </div>
+
+  <div class="card">
+    <h2>运行环境与网关头</h2>
+    <div class="kv" id="rt"></div>
+  </div>
+
+  <div class="card">
+    <h2>原始数据</h2>
+    <details><summary>展开 JSON</summary><pre id="raw"></pre></details>
+  </div>
+
+  <footer>fnnetmon M0 探针 · 数据来源为本机 /proc /sys 与 fnOS 环境变量</footer>
+</div>
+
+<script>
+let DATA = null;
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function row(k, v, cls){
+  return `<div class="k">${esc(k)}</div><div class="v2 ${cls||''}">${v}</div>`;
+}
+function fmtBytes(n){
+  if(n == null) return '-';
+  const u=['B','KB','MB','GB','TB']; let i=0; let x=n;
+  while(x>=1024 && i<u.length-1){ x/=1024; i++; }
+  return x.toFixed(i?1:0)+' '+u[i];
+}
+function lvlText(l){ return l==='ok'?'正常':(l==='warn'?'需注意':'不可用'); }
+
+function render(d){
+  document.getElementById('ver').textContent = 'v' + d.app_version;
+  document.getElementById('ts').textContent = d.generated_at;
+
+  document.getElementById('verdict').innerHTML = (d.verdict||[]).map(v =>
+    `<div class="v ${v.level}"><span class="dot"></span><div>
+       <div class="k">${esc(v.label)} · ${lvlText(v.level)}</div>
+       <div class="d">${esc(v.detail)}</div>
+     </div></div>`).join('');
+
+  const s = d.system||{};
+  document.getElementById('sys').innerHTML =
+    row('系统', esc(s.distro||'-')) +
+    row('内核', esc((s.sysname||'')+' '+(s.release||''))) +
+    row('架构', esc(s.machine||'-') + ' · ' + (s.cores||0) + ' 核') +
+    row('CPU', esc(s.cpu_model||'-')) +
+    row('内存', esc(s.mem_total||'-')) +
+    row('运行时长', esc(s.uptime||'-'));
+
+  const k = d.kernel||{};
+  const yn = b => b ? '<span class="good">可用</span>' : '<span class="bad">不可用</span>';
+  document.getElementById('kern').innerHTML =
+    row('BTF (/sys/kernel/btf/vmlinux)', yn(k.btf_ok) + (k.btf_size? ' · '+fmtBytes(k.btf_size):'')) +
+    row('bpf() 系统调用', yn(k.bpf_ok) + ' · ' + esc(k.bpf_syscall||'-')) +
+    row('kprobe / tracefs', yn(k.kprobe_ok) + ' · ' + esc(k.tracefs||'-')) +
+    row('内核配置来源', esc(k.config_file||'-')) +
+    row('lockdown', esc(k.lockdown||'-')) +
+    row('sysctl', Object.entries(k.sysctl||{}).map(([a,b])=>esc(a)+'='+esc(b)).join(' · ')||'-') +
+    row('已装工具', Object.entries(k.tools||{}).map(([a,b])=>
+        `<span class="${b?'good':'bad'}">${esc(a)}</span>`).join(' · '));
+
+  const cfg = k.config||{};
+  const keys = Object.keys(cfg);
+  document.getElementById('cfg').innerHTML = keys.length
+    ? '<tr><th>内核编译项</th><th>值</th></tr>' + keys.map(key =>
+        `<tr><td class="mono">${esc(key)}</td><td class="mono ${cfg[key]==='y'?'good':'bad'}">${esc(cfg[key])}</td></tr>`).join('')
+    : '<tr><td class="mono">未读取到内核配置（不影响运行，仅降低交叉验证能力）</td></tr>';
+
+  const n = d.net||{};
+  document.getElementById('net').innerHTML =
+    '<tr><th>网卡</th><th>状态</th><th>速率</th><th>下行</th><th>上行</th><th>累计 ↓/↑</th></tr>' +
+    (n.interfaces||[]).map(i =>
+      `<tr><td class="mono">${esc(i.name)}${i.virtual?' <span style="opacity:.6">虚拟</span>':''}</td>
+       <td>${esc(i.state)}</td><td>${esc(i.speed||'-')}${i.speed&&i.speed!=='-1'?' Mb/s':''}</td>
+       <td>${(i.rx_rate_kbs||0).toFixed(1)} KB/s</td><td>${(i.tx_rate_kbs||0).toFixed(1)} KB/s</td>
+       <td class="mono">${fmtBytes(i.rx_bytes)} / ${fmtBytes(i.tx_bytes)}</td></tr>`).join('') +
+    `<tr><td colspan="6" style="color:var(--sub)">默认路由网卡：<span class="mono">${esc(n.default_route||'-')}</span>
+      · 当前连接数 ${n.conn_total||0}（${Object.entries(n.conn_by_proto||{}).map(([a,b])=>esc(a)+' '+b).join(' / ')||'-'}）</td></tr>`;
+
+  const a = d.attribution||{};
+  const covCls = a.coverage_pct>=90?'good':(a.coverage_pct>0?'mid':'bad');
+  document.getElementById('attr').innerHTML =
+    row('连接覆盖', `<span class="${covCls}">${(a.coverage_pct||0).toFixed(0)}%</span>（${a.conn_mapped||0}/${a.conn_total||0}）`) +
+    row('进程数', (a.proc_count||0) + ' 个') +
+    row('socket fd 总数', (a.socket_fds||0) + ' 个') +
+    row('全量扫描耗时', `<span class="${a.scan_ms<300?'good':'mid'}">${(a.scan_ms||0).toFixed(1)} ms</span>`) +
+    row('可读 /proc/1/fd', a.can_read_proc1_fd ? '<span class="good">是</span>' : '<span class="bad">否</span>');
+
+  const dk = d.docker||{};
+  document.getElementById('dock').innerHTML =
+    row('Docker socket', dk.socket_exists ? '<span class="good">存在</span>' : '<span class="bad">不存在</span>') +
+    row('Docker 版本', esc(dk.version||'-')) +
+    row('容器数量', (dk.containers||0) + ' 个 · veth ' + (dk.veth_count||0) + ' 个') +
+    row('容器列表', esc((dk.names||[]).join('、')||'-')) +
+    (dk.error? row('错误', '<span class="bad">'+esc(dk.error)+'</span>') : '');
+
+  const rt = d.runtime||{};
+  const gw = d.gateway||{};
+  const trimKeys = Object.keys(gw).filter(x => x.toLowerCase().startsWith('x-trim-'));
+  const gwHtml = (trimKeys.length
+      ? trimKeys.map(x => esc(x) + ': ' + esc(gw[x])).join('<br>')
+      : '<span class="mid">未经过统一网关（直连访问）</span>')
+    + '<br><span style="opacity:.7">来源 ' + esc(gw._remote_addr||'-') + '</span>';
+  document.getElementById('rt').innerHTML =
+    row('运行用户', esc(rt.user||'-') + ' (euid ' + (rt.euid??'-') + ')') +
+    row('进程内存', esc(rt.rss||'-')) +
+    row('可执行文件', '<span class="mono">'+esc(rt.exe||'-')+'</span>') +
+    row('fnOS 环境变量', Object.entries(d.fnos||{}).map(([a,b])=>esc(a.replace('TRIM_',''))+'='+esc(b)).join('<br>')||'-') +
+    row('网关头', gwHtml);
+
+  document.getElementById('raw').textContent = JSON.stringify(d, null, 2);
+}
+
+function apiUrl(){
+  // iframe 打开的是 /app/fnnetmon（无尾斜杠），相对路径会被解析成 /app/api/diag，
+  // 所以这里必须基于当前路径显式拼绝对地址。
+  const p = location.pathname.replace(/\/+$/,'');
+  if (p.startsWith('/app/')) return p + '/api/diag';
+  return '/api/diag';
+}
+async function load(refresh){
+  const btn = document.querySelector('button[onclick^="load"]');
+  if(btn) btn.disabled = true;
+  try{
+    const r = await fetch(apiUrl() + (refresh?'?refresh=1':''), {cache:'no-store'});
+    const txt = await r.text();
+    try{
+      DATA = JSON.parse(txt);
+    }catch(e){
+      throw new Error('接口返回非 JSON（HTTP ' + r.status + '，地址 ' + apiUrl() + '）：' + txt.slice(0,180));
+    }
+    render(DATA);
+  }catch(e){
+    document.getElementById('verdict').innerHTML =
+      `<div class="v fail"><span class="dot"></span><div><div class="k">读取失败</div>
+       <div class="d">${esc(e.message)}</div></div></div>`;
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+function copyReport(btn){
+  if(!DATA) return;
+  const b = btn || document.querySelector('button[onclick^="copyReport"]');
+  navigator.clipboard.writeText(JSON.stringify(DATA,null,2)).then(
+    ()=>{ if(b){ b.textContent='已复制'; setTimeout(()=>b.textContent='复制报告',1500); } },
+    ()=>alert('复制失败，请手动展开下方 JSON'));
+}
+load(false);
+</script>
+</body>
+</html>

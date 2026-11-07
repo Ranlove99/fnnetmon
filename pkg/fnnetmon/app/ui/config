@@ -1,0 +1,25 @@
+{
+    ".url": {
+        "fnnetmon.main": {
+            "title": "流量哨兵",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "port": "18089",
+            "url": "/",
+            "allUsers": false,
+            "control": {
+                "accessPerm": "readonly"
+            }
+        },
+        "fnnetmon.direct": {
+            "title": "流量哨兵（直连备用）",
+            "icon": "images/icon_{0}.png",
+            "type": "url",
+            "protocol": "http",
+            "port": "18089",
+            "url": "/",
+            "allUsers": false
+        }
+    }
+}
