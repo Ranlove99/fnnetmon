@@ -55,7 +55,7 @@ appcenter-cli install-fpk fnnetmon_0.9.9_x86.fpk   # 按实际架构换文件名
 前置：Go 1.26+、Python 3（只用标准库）。不需要 Node、CGO 或 Docker。
 
 ```bash
-git clone https://github.com/<你的用户名>/fnnetmon.git
+git clone https://github.com/Ranlove99/fnnetmon.git
 cd fnnetmon
 ./build.sh both          # 或 ./build.sh arm64 / ./build.sh amd64
 ```
@@ -179,7 +179,7 @@ cd fnnetmon
 git init -b main
 git add .
 git commit -m "Initial import: fnnetmon 0.9.9"
-git remote add origin https://github.com/<你的用户名>/fnnetmon.git
+git remote add origin https://github.com/Ranlove99/fnnetmon.git
 git push -u origin main
 ```
 
