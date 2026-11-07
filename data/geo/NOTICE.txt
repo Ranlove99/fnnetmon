@@ -1,6 +1,9 @@
 GeoLite2 数据署名 / Attribution
 ================================
 
+本项目源码按 MIT 许可（见仓库根目录 LICENSE）。本文件说明随 fpk 一起分发的
+地理数据库的独立许可：它们**不**适用 MIT，而是按 CC BY-SA 4.0 发布。
+
 本应用内置以下数据库，随 fpk 一起分发：
 
   GeoLite2-Country.mmdb
